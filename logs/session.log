@@ -1,0 +1,23 @@
+09:39:05 [INFO] --- DEEPBIO-SCAN SESSION INITIALIZED ---
+09:39:05 [INFO] Logging Bridge established at: C:\Volume D\DeepBio_Edgev4\logs\session.log
+09:39:40 [INFO] Initializing Embedder on CPU...
+09:39:43 [INFO] Model Configuration: Hidden Size detected as 512
+09:39:43 [INFO] Config Check: Using intermediate_size=2048 (Matches Checkpoint Expectation)
+09:39:46 [INFO] DeepBio Foundation Model loaded successfully with Shape Defense protocols.
+09:39:46 [INFO] Initializing AtlasManager at C:\Volume D\DeepBio_Edgev4\data\db...
+09:39:46 [WARNING] Table 'reference_atlas' not found. Use ingest_atlas() to seed data.
+09:39:46 [WARNING] NCBI Taxdump missing at C:\Volume D\DeepBio_Edgev4\data\taxonomy_db. Lineage resolution might fail.
+09:39:46 [INFO] Checking TaxonKit at: C:\Volume D\DeepBio_Edgev4\taxonkit.exe
+09:39:46 [WARNING] TaxonKit not found/executable at C:\Volume D\DeepBio_Edgev4\taxonkit.exe. switching to MOCK MODE.
+09:45:33 [INFO] Verified directory: C:\Volume D\DeepBio_Edgev4\data\db
+09:45:33 [INFO] Verified directory: C:\Volume D\DeepBio_Edgev4\data\raw
+09:45:33 [INFO] Verified directory: C:\Volume D\DeepBio_Edgev4\logs
+09:45:37 [INFO] Verified directory: C:\Volume D\DeepBio_Edgev4\data\db
+09:45:37 [INFO] Verified directory: C:\Volume D\DeepBio_Edgev4\data\raw
+09:45:37 [INFO] Verified directory: C:\Volume D\DeepBio_Edgev4\logs
+09:45:37 [INFO] Mounting File: obis_deepsea_subset.parquet
+09:45:37 [INFO] Loading Local CPU Inference Engine...
+09:45:37 [INFO] Vectorizing Query Sequence (Local)...
+09:45:37 [INFO] Querying 32GB Colab-Seeded Atlas on D:/...
+09:45:37 [INFO] Streaming 1000 rows from Parquet: C:\Users\FAISAL~1\AppData\Local\Temp\tmpeudyrvyo.parquet
+09:45:37 [INFO] Stream Complete. Processed 0 sequences.

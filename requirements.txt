@@ -1,0 +1,10 @@
+torch>=2.0.0
+transformers
+numpy
+lancedb
+duckdb
+streamlit
+hdbscan
+pandas
+scikit-learn
+plotly
