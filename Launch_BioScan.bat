@@ -6,6 +6,12 @@ echo       DEEPBIO-SCAN | EDGE GENOMIC CONSOLE v4.2
 echo ========================================================
 echo.
 
+:: 0. Log Cleanup
+if exist "logs\session.log" (
+    del "logs\session.log"
+    echo [*] System Logs Cleared.
+)
+
 :: 1. Environment Setup
 echo [*] Initializing Environment Variables...
 set "PYTHONPATH=%~dp0"
@@ -27,7 +33,7 @@ echo [*] Loading Nucleotide Transformer (v2-50m)...
 timeout /t 1 >nul
 echo [OK] Model Weights Verified.
 echo.
-echo [*] Mounting LanceDB Vector Index (IVF-PQ)...
+echo [*] Mounting Expedition Atlas (GLO-DB)...
 timeout /t 1 >nul
 echo [OK] Index Mounted (Read/Write).
 echo.

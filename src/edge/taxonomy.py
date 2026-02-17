@@ -256,11 +256,12 @@ class TaxonomyEngine:
             "scientific_name": final_name,
             "status": status_label,
             "is_novel": is_novel,
+            "confidence": top_sim,
             "confidence_pct": top_sim * 100,
             "consensus_score": consensus_conf,
             "lineage": lineage_str,
             "source_method": source,
-            "vector": top_hit.get('vector', None) or top_hit.get('vectors', None)
+            "vector": top_hit.get('vector') if top_hit.get('vector') is not None else top_hit.get('vectors')
         }
 
     def format_search_results(self, raw_hits: List[Dict], gene_type: str="COI") -> List[Dict]:
