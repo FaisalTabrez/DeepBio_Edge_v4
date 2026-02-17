@@ -44,7 +44,7 @@ from src.interface.docs import render_docs
 # ==========================================
 st.set_page_config(
     page_title="Global-BioScan | Edge Console",
-    page_icon="🕸️",
+    page_icon=":material/biotech:",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -162,6 +162,7 @@ st.markdown("""
         border: none;
         color: #64748B;
         font-weight: 600;
+        text-transform: uppercase;
     }
     .stTabs [data-baseweb="tab"][aria-selected="true"] {
         color: #00E5FF;
@@ -230,18 +231,18 @@ if not embedder or not atlas or not taxonomy or not viz or not discovery:
 # 2. Sidebar (Command Center)
 # -----------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown("## 📡 COMMAND CENTER")
+    st.markdown("## COMMAND CENTER")
     st.markdown("---")
     
     # Connection Status
-    st.markdown("### 🔌 LINK STATUS")
+    st.markdown("### LINK STATUS")
     col_link1, col_link2 = st.columns(2)
     with col_link1:
-        st.markdown(f"🟢 **EDGE AI**<br><span style='font-size:0.8em; color:#64748B'>ONLINE</span>", unsafe_allow_html=True)
+        st.markdown(f":material/settings_input_antenna: **EDGE AI**<br><span style='font-size:0.8em; color:#64748B'>ONLINE</span>", unsafe_allow_html=True)
     with col_link2:
         # Check actual row count for status
         row_count = atlas.table.count_rows() if atlas.table else 0
-        db_color = "🟢" if row_count > 0 else "🔴"
+        db_color = ":material/check_circle:" if row_count > 0 else ":material/error:"
         db_status = f"ONLINE ({row_count} Vectors)" if row_count > 0 else "OFFLINE"
         
         st.markdown(f"{db_color} **GLO-DB**<br><span style='font-size:0.8em; color:#64748B'>{db_status}</span>", unsafe_allow_html=True)
@@ -249,7 +250,7 @@ with st.sidebar:
     st.markdown("---")
     
     # Hardware Health
-    st.markdown("### ⚙️ HARDWARE HEALTH")
+    st.markdown("### HARDWARE HEALTH")
     
     # Simulated Metrics or Real if psutil
     if psutil:
@@ -268,7 +269,7 @@ with st.sidebar:
     st.markdown("---")
     
     # Atlas Metadata
-    st.markdown("### 🗺️ ATLAS METADATA")
+    st.markdown("### ATLAS METADATA")
     st.caption("**Source:** Colab (Volume E:)")
     st.caption("**Embedding Model:** Nucleotide-Transformer-v2-50M")
     st.caption("**Vector Dimensions:** 512 (Float32)")
@@ -276,16 +277,16 @@ with st.sidebar:
     st.markdown("---")
     
     # Config
-    st.markdown("### 🧬 CONFIGURATION")
+    st.markdown("### CONFIGURATION")
     gene_selector = st.selectbox(
         "GENE MARKER", 
         ["COI", "18S"], 
         help="Switch calibration protocols."
     )
     if gene_selector == "18S":
-        st.caption("🔒 STRICT MODE ACTIVE")
+        st.caption(":material/lock: STRICT MODE ACTIVE")
     else:
-        st.caption("🔓 STANDARD MODE ACTIVE")
+        st.caption(":material/lock_open: STANDARD MODE ACTIVE")
 
 # -----------------------------------------------------------------------------
 # 3. Top KPI Row
@@ -315,11 +316,11 @@ st.markdown("---")
 # Main Interface Tabs
 # -----------------------------------------------------------------------------
 tab_monitor, tab_visualizer, tab_discovery, tab_report, tab_docs = st.tabs([
-    "🖥️ MONITOR & SCAN", 
-    "🌌 MANIFOLD VISUALIZER", 
-    "🔬 NOVELTY DISCOVERY", 
-    "📊 BIODIVERSITY REPORT",
-    "📚 DOCUMENTATION"
+    "REAL-TIME MONITOR", 
+    "GENOMIC MANIFOLD", 
+    "TAXONOMIC INFERENCE", 
+    "NOVELTY DISCOVERY",
+    "EXPEDITION MANUAL"
 ])
 
 from src.edge.config_init import LOGS_PATH
@@ -341,7 +342,7 @@ def display_terminal_logs():
     """
     log_file = LOGS_PATH / 'session.log'
     if not log_file.exists():
-        return "Waiting for system logs..."
+        return "INFO: Waiting for system logs..."
         
     try:
         with open(log_file, 'r', encoding='utf-8') as f:
@@ -349,9 +350,27 @@ def display_terminal_logs():
             # Get last 20 lines
             last_lines = lines[-20:] if len(lines) > 20 else lines
             # Clean up default format for UI
-            return "<br>".join([f"<span style='color:#00FF00'>{l.strip()}</span>" for l in last_lines])
+            formatted_lines = []
+            for l in last_lines:
+                clean_line = l.strip()
+                if "ERROR" in clean_line or "CRITICAL" in clean_line:
+                    prefix = "FAIL"
+                    color = "#FF007A"
+                elif "WARNING" in clean_line:
+                    prefix = "WARN"
+                    color = "#FACC15"
+                elif "SUCCESS" in clean_line or "OK" in clean_line:
+                    prefix = "SUCCESS"
+                    color = "#00E5FF"
+                else:
+                    prefix = "INFO"
+                    color = "#00FF00"
+                    
+                formatted_lines.append(f"<span style='color:{color}'>[{prefix}] {clean_line}</span>")
+                
+            return "<br>".join(formatted_lines)
     except Exception as e:
-        return f"Log Read Error: {e}"
+        return f"FAIL: Log Read Error: {e}"
 
 # Initialize Results Buffer
 if 'scan_results_buffer' not in st.session_state:
@@ -363,7 +382,7 @@ with tab_monitor:
     
     with col_input:
         st.markdown('<div class="glass-panel">', unsafe_allow_html=True)
-        st.subheader("📥 Sequence Ingestion")
+        st.subheader("SEQUENCE INGESTION")
         
         uploaded_file = st.file_uploader(
             "Upload Genomic Data Stream", 
@@ -374,7 +393,7 @@ with tab_monitor:
         # Check for Demo Mode
         demo_active = False
         if 'demo_mode' in st.session_state and st.session_state.demo_mode:
-            st.info("🔹 DEMO MODE: Loaded 'Hadal_Zone_Sample_Batch_04.fasta'")
+            st.info("DEMO MODE: Loaded 'Hadal_Zone_Sample_Batch_04.fasta'")
             demo_active = True
 
         # Determine Active Input
@@ -397,7 +416,7 @@ with tab_monitor:
             
             st.markdown(f"""
             <div class='uploadedFile'>
-                <b>📄 Stream Metadata</b><br>
+                <b>STREAM METADATA</b><br>
                 Name: <span style='color:#00E5FF'>{file_details['Filename']}</span><br>
                 Size: <span style='color:#00E5FF'>{file_details['Size']}</span>
             </div>
@@ -406,8 +425,8 @@ with tab_monitor:
             st.divider()
             
             col_act1, col_act2 = st.columns(2)
-            start_btn = col_act1.button("▶ INITIATE STREAM", use_container_width=True)
-            stop_btn = col_act2.button("⏹ STOP INFERENCE", use_container_width=True)
+            start_btn = col_act1.button("INITIATE STREAM", use_container_width=True, icon=":material/play_arrow:")
+            stop_btn = col_act2.button("STOP INFERENCE", use_container_width=True, icon=":material/stop:")
             
             if start_btn:
                 log_event(f"Mounting File: {file_details['Filename']}")
@@ -479,7 +498,7 @@ with tab_monitor:
                         if len(st.session_state.scan_results_buffer) > 50:
                             st.session_state.scan_results_buffer.pop()
                             
-                    log_event(f"Stream Complete. Processed {count} sequences.")
+                    log_event(f"SUCCESS: Stream Complete. Processed {count} sequences.")
                     progress_bar.progress(100)
                     progress_text.text("Analysis Complete.")
                     
@@ -489,13 +508,13 @@ with tab_monitor:
                              clusters = discovery.analyze_novelty(st.session_state.scan_results_buffer)
                              st.session_state.novel_clusters = clusters
                              if clusters:
-                                 log_event(f"DISCOVERY: {len(clusters)} novel clusters identified.")
+                                 log_event(f"SUCCESS: DISCOVERY: {len(clusters)} novel clusters identified.")
                          except Exception as de:
                              logger.error(f"Discovery Failed: {de}")
 
                 except Exception as e:
                     st.error(f"Stream Error: {e}")
-                    log_event(f"ERROR: {e}")
+                    log_event(f"FAIL: ERROR: {e}")
                 finally:
                     os.unlink(tmp_path) # Cleanup
         
@@ -503,7 +522,7 @@ with tab_monitor:
 
     # 4. Results Loop (Discovery Cards)
     with col_results:
-        st.markdown("### 🧬 ANALYSIS FEED")
+        st.markdown("### ANALYSIS FEED")
         
         # Container for scrollable results
         results_container = st.container(height=600)
@@ -514,7 +533,11 @@ with tab_monitor:
                     # Determine Styling
                     is_novel = hit.get('is_novel', False)
                     card_class = "discovery-card-novel" if is_novel else "discovery-card-known"
-                    icon = "🌌" if is_novel else "🦠"
+                    
+                    # Icons & Labels
+                    icon_code = ":material/new_releases:" if is_novel else ":material/check_circle:"
+                    status_prefix = "[NOVEL]" if is_novel else "[KNOWN]"
+                    
                     text_class = "neon-text-pink" if is_novel else "neon-text-cyan"
                     bar_color = "#FF007A" if is_novel else "#00E5FF"
                     
@@ -522,12 +545,17 @@ with tab_monitor:
                     sim_pct = hit['similarity'] * 100
                     
                     # HTML Card
+                    # We inject Material Icons via simple text or span since HTML in markdown doesn't parse :icon: syntax directly
+                    # Actually, Streamlit Markdown supports symbols. For HTML block we use text fallback.
+                    
+                    card_icon_html = "✦" if is_novel else "✓"
+                    
                     st.markdown(f"""
                     <div class="glass-panel {card_class}" style="padding: 15px; margin-bottom: 15px;">
                         <div style="display: flex; justify-content: space-between; align-items: start;">
                             <div>
                                 <span style="font-size: 0.8em; color: #94A3B8;">QUERY: {hit.get('query_id', 'Unknown')}</span>
-                                <h3 class="{text_class}" style="margin: 5px 0;">{icon} {hit['display_name']}</h3>
+                                <h3 class="{text_class}" style="margin: 5px 0;">{card_icon_html} {hit['display_name']}</h3>
                                 <div class="breadcrumb">{hit['display_lineage'].replace('Unknown', '???')}</div>
                             </div>
                             <div style="text-align: right;">
@@ -539,7 +567,7 @@ with tab_monitor:
                             <div style="width: {sim_pct}%; background: {bar_color}; height: 100%; box-shadow: 0 0 10px {bar_color};"></div>
                         </div>
                         <div style="margin-top: 8px; font-size: 0.85em; color: #CBD5E1;">
-                            STATUS: <b>{hit['status'].upper()}</b>
+                            TYPE: <b>{status_prefix}</b> | STATUS: {hit['status'].upper()}
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
@@ -549,15 +577,7 @@ with tab_monitor:
                 st.info("Waiting for Scan Data... System Idle.")
 
     # 5. System Logs
-    st.markdown("### 📟 SYSTEM LOGS")
-    
-    # Auto-refresh mechanism for logs
-    # We use a fragment approach or simply a rerun button if needed, 
-    # but Streamlit's reactive nature updates this when input changes.
-    # To force a periodic refresh could be done with st.empty() inside a loop, 
-    # but here we rely on the main loop. 
-    # Since the user asked for logic "Use a short time.sleep or Streamlit's st.empty() fragment",
-    # let's assume this renders on every re-run.
+    st.markdown("### SYSTEM LOGS")
     
     log_content = display_terminal_logs()
     
@@ -571,7 +591,7 @@ with tab_monitor:
 # --- TAB 2: MANIFOLD VISUALIZER ---
 with tab_visualizer:
     st.markdown('<div class="glass-panel">', unsafe_allow_html=True)
-    st.subheader("🌌 Latent Space Topology")
+    st.subheader("LATENT SPACE TOPOLOGY")
     
     if 'viz_context' in st.session_state and st.session_state.viz_context:
         ctx = st.session_state.viz_context
@@ -600,7 +620,7 @@ with tab_visualizer:
 # --- TAB 3: NOVELTY DISCOVERY ---
 with tab_discovery:
     st.markdown('<div class="glass-panel">', unsafe_allow_html=True)
-    st.subheader("🧬 Unsupervised Biological Discovery Engine")
+    st.subheader("UNSUPERVISED BIOLOGICAL DISCOVERY ENGINE")
     st.caption("Auto-Clustering 'Dark Taxa' to identify potential new species groups.")
     
     if 'scan_results_buffer' in st.session_state and st.session_state.scan_results_buffer:
@@ -623,7 +643,7 @@ with tab_discovery:
                     
                     st.markdown(f"""
                     <div style="border: 1px solid {gauge_color}; padding: 15px; border-radius: 8px; background: rgba(0,0,0,0.3); margin-bottom: 20px;">
-                        <h4 style="color: {gauge_color}; margin: 0;">🌌 {entity['otu_id']}</h4>
+                        <h4 style="color: {gauge_color}; margin: 0;">✦ {entity['otu_id']}</h4>
                         <div style="font-size: 0.8em; color: #94A3B8; margin-bottom: 10px;">{entity['status']}</div>
                         
                         <div style="margin-bottom: 5px;">
@@ -649,7 +669,7 @@ with tab_discovery:
             st.divider()
             
             # 3. Export Action
-            if st.button("📥 Export Clusters for Phylogenetic Tree"):
+            if st.button("EXPORT CLUSTERS (Phylogenetic Tree)", icon=":material/download:"):
                 export_path = Path("E:/DeepBio_Scan/results/novel_clusters.fasta")
                 # Fallback to local if E: missing
                 if not Path("E:/").exists():
@@ -674,7 +694,8 @@ with tab_discovery:
 
 # --- TAB 4: REPORT ---
 with tab_report:
-    st.markdown("### 📊 EXPEDITION METRICS")
+    st.markdown("### EXPEDITION METRICS")
+
     col_rep1, col_rep2 = st.columns([2, 1])
     
     with col_rep1:

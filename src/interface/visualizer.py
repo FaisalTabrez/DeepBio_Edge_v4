@@ -33,8 +33,6 @@ class ManifoldVisualizer:
         ]
         
         # @UX-Visionary: Pre-fetch background cloud logic
-        # Ideally, this should be done once or cached.
-        # We will require the AtlasManager to be passed during invocation or fetching.
         self.background_cloud_df = None
 
     def load_background_cloud(self, atlas_manager):
@@ -47,10 +45,6 @@ class ManifoldVisualizer:
              
         try:
              if atlas_manager and atlas_manager.table:
-                 # Fetch random sample (LanceDB doesn't do 'ORDER BY RANDOM' easily yet on large datasets)
-                 # We fetch LIMIT 3000 then sample, or just head if small.
-                 # Given limited hardware, let's grab top 2000 and sample.
-                 
                  logger.info("Loading Background Atlas Cloud from LanceDB...")
                  df = atlas_manager.table.head(2000).to_pandas()
                  
@@ -78,36 +72,45 @@ class ManifoldVisualizer:
             # Prepare Training Set for PCA Fit
             # Includes Background + References to define axes
             if background_vectors is not None and len(background_vectors) > 10:
-                fit_data = np.vstack([background_vectors, ref_vectors])
-            else:
+                if len(ref_vectors) > 0:
+                    fit_data = np.vstack([background_vectors, ref_vectors])
+                else:
+                    fit_data = background_vectors
+            elif len(ref_vectors) > 0:
                 fit_data = ref_vectors
+            else:
+                 # Edge case: No data to fit (fresh DB)
+                 # Fit on query + noise for stability
+                 fit_data = np.vstack([query_vector, query_vector + np.random.normal(0, 0.01, query_vector.shape)])
                 
             # Fit PCA
+            if len(fit_data) < 3:
+                return pd.DataFrame()
+
             pca.fit(fit_data)
             
-            # Transform All Components
-            pca_ref = pca.transform(ref_vectors)
-            pca_query = pca.transform(query_vector.reshape(1, -1))
-            
-            cols = ['x', 'y', 'z']
-            df_ref = pd.DataFrame(pca_ref, columns=cols)
-            df_ref['type'] = 'reference'
-            
-            df_query = pd.DataFrame(pca_query, columns=cols)
-            df_query['type'] = 'query'
-            
-            # Transform Background
+            # --- TRANSFORM ---
             df_bg = pd.DataFrame()
             if background_vectors is not None and len(background_vectors) > 0:
                  pca_bg = pca.transform(background_vectors)
-                 df_bg = pd.DataFrame(pca_bg, columns=cols)
+                 df_bg = pd.DataFrame(pca_bg, columns=['x', 'y', 'z'])
                  df_bg['type'] = 'background'
+            
+            df_ref = pd.DataFrame()
+            if len(ref_vectors) > 0:
+                pca_ref = pca.transform(ref_vectors)
+                df_ref = pd.DataFrame(pca_ref, columns=['x', 'y', 'z'])
+                df_ref['type'] = 'reference'
+            
+            pca_query = pca.transform(query_vector.reshape(1, -1))
+            df_query = pd.DataFrame(pca_query, columns=['x', 'y', 'z'])
+            df_query['type'] = 'query'
             
             # Transform Clusters (NTUs)
             df_clusters = pd.DataFrame()
             if cluster_vectors is not None and len(cluster_vectors) > 0:
                  pca_clus = pca.transform(cluster_vectors)
-                 df_clusters = pd.DataFrame(pca_clus, columns=cols)
+                 df_clusters = pd.DataFrame(pca_clus, columns=['x', 'y', 'z'])
                  df_clusters['type'] = 'cluster_point'
 
             return pd.concat([df_bg, df_ref, df_query, df_clusters], ignore_index=True)
@@ -117,95 +120,81 @@ class ManifoldVisualizer:
             return pd.DataFrame()
 
     def create_plot(self, 
-                   reference_hits: List[Dict[str, Any]], 
-                   query_vector: Any, 
-                   query_display_name: str, 
+                   reference_hits: List[Dict], 
+                   query_vector: np.ndarray, 
+                   query_display_name: str,
                    is_novel: bool,
-                   atlas_manager = None,
-                   novel_clusters: Optional[List[Dict]] = None) -> go.Figure:
+                   atlas_manager: Any,
+                   novel_clusters: List[Dict] = None) -> go.Figure:
         """
         Generates the Plotly 3D Figure using Real Data.
         """
-        if not reference_hits:
-            return go.Figure()
-            
-        # Lazy Load Background
-        if atlas_manager:
+        # 1. Ensure Background
+        if self.background_cloud_df is None:
             self.load_background_cloud(atlas_manager)
-
-        # 1. Extract Vectors & Metadata (Hits)
+            
+        # 2. Extract Vectors from Hits
+        vectors = []
         valid_refs = []
         
-        # Determine expected dimension from query if possible, else 512 default
-        expected_dim = 512
-        if isinstance(query_vector, (list, np.ndarray)):
-             expected_dim = len(query_vector) if isinstance(query_vector, list) else query_vector.shape[-1]
-             
         for hit in reference_hits:
-            vec = hit.get('vector')
-            if vec is None:
-                 # Try 'vectors' key or fallback
-                 vec = hit.get('vectors')
+            v = hit.get('vector')
+            if v is None: v = hit.get('vectors') # Try fallback
             
-            if vec is None:
-                # Fallback purely for safety, though database.py should guarantee vector return now
-                vec = np.random.rand(expected_dim).tolist() 
-            valid_refs.append(hit)
-            hit['_viz_vector'] = vec 
-
-        ref_vectors = np.array([h['_viz_vector'] for h in valid_refs])
-        
-        # 2. Extract Background Vectors
-        bg_vectors = None
+            if v is not None:
+                if isinstance(v, list):
+                    vectors.append(np.array(v, dtype=np.float32))
+                else:
+                    vectors.append(v)
+                valid_refs.append(hit)
+                
+        if vectors:
+            ref_vecs_np = np.vstack(vectors)
+        else:
+            ref_vecs_np = np.empty((0, 768)) # Shape guess
+            
+        # 3. Get Background Vectors
+        bg_vecs_np = None
         valid_bg = []
-        if self.background_cloud_df is not None:
-             # Ensure 'vector' column exists and clean
-             if 'vector' in self.background_cloud_df.columns:
-                 # Extract and stack
-                 # Pandas series of arrays -> vstack is tricky, need list of arrays
-                 raw_vecs = self.background_cloud_df['vector'].tolist()
-                 if len(raw_vecs) > 0:
-                     # Check dim to match Ref (could be 512 or 768)
-                     dim_ref = ref_vectors.shape[1]
-                     dim_bg = len(raw_vecs[0])
-                     
-                     if dim_ref == dim_bg:
-                         bg_vectors = np.vstack(raw_vecs)
-                         # Store metadata for tooltips
-                         valid_bg = self.background_cloud_df.to_dict('records')
+        if self.background_cloud_df is not None and not self.background_cloud_df.empty:
+            if 'vector' in self.background_cloud_df.columns:
+                 # Clean nans if any
+                 bg_clean = self.background_cloud_df.dropna(subset=['vector'])
+                 bg_list = bg_clean['vector'].tolist()
+                 if bg_list:
+                    bg_vecs_np = np.vstack(bg_list)
+                    valid_bg = bg_clean.to_dict('records')
 
-        # 3. Extract Cluster Vectors
+        # 4. Extract Cluster Vectors
         cluster_vectors = None
-        cluster_map = {} # map index in cluster_vectors to cluster_id
-        
+        cluster_map = {} 
         if novel_clusters:
             temp_vecs = []
-            c_idx = 0
-            for cluster in novel_clusters:
-                # Use avg_vector as the representative for now since member_vectors might not be passed back fully by app
+            for i, cluster in enumerate(novel_clusters):
                 if 'avg_vector' in cluster:
                     v = cluster['avg_vector']
-                    if isinstance(v, list):
-                        v = np.array(v)
+                    if isinstance(v, list): v = np.array(v)
                     temp_vecs.append(v)
-                    cluster_map[c_idx] = cluster.get('otu_id', 'Unknown')
-                    c_idx += 1
+                    cluster_map[i] = cluster.get('otu_id', 'Unknown')
             if temp_vecs:
                 cluster_vectors = np.vstack(temp_vecs)
-        
-        # Ensure query vector is numpy
-        if isinstance(query_vector, list):
-            q_vec_np = np.array(query_vector)
-        else:
-            q_vec_np = query_vector
 
-        # 4. Run PCA
-        combined_coords = self.perform_pca_reduction(ref_vectors, q_vec_np, bg_vectors, cluster_vectors)
+        # 5. Run PCA - Dimension Reduction
+        # Ensure query is numpy
+        if isinstance(query_vector, list):
+            query_vector = np.array(query_vector)
+            
+        combined_coords = self.perform_pca_reduction(
+            ref_vectors=ref_vecs_np,
+            query_vector=query_vector,
+            background_vectors=bg_vecs_np,
+            cluster_vectors=cluster_vectors
+        )
         
         if combined_coords.empty:
             return go.Figure()
 
-        # Split back
+        # 6. Split Coords back to logical groups
         bg_coords = combined_coords[combined_coords['type'] == 'background'].reset_index(drop=True)
         ref_coords = combined_coords[combined_coords['type'] == 'reference'].reset_index(drop=True)
         query_coords = combined_coords[combined_coords['type'] == 'query'].iloc[0]
@@ -213,163 +202,135 @@ class ManifoldVisualizer:
         if 'cluster_point' in combined_coords['type'].values:
              cluster_coords = combined_coords[combined_coords['type'] == 'cluster_point'].reset_index(drop=True)
 
-        # 5. Build Traces
+        # --- PLOTLY CONSTRUCTION ---
         fig = go.Figure()
 
-        # --- Novel Clusters (Neon Pink Clouds) ---
+        # A. Background Cloud (The Universe) - Dark & Subtle
+        if not bg_coords.empty:
+            # Create hover text
+            hover_bg = [
+                f"Record: {valid_bg[i].get('scientific_name', 'Unknown')}" 
+                if i < len(valid_bg) else "Record: Unknown"
+                for i in range(len(bg_coords))
+            ]
+            
+            fig.add_trace(go.Scatter3d(
+                x=bg_coords['x'], y=bg_coords['y'], z=bg_coords['z'],
+                mode='markers',
+                marker=dict(size=2, color='#334155', opacity=0.3),
+                hoverinfo='text',
+                text=hover_bg,
+                name='Atlas Background'
+            ))
+
+        # B. Reference Context (The Neighbors) - Cyan #00E5FF
+        if not ref_coords.empty:
+            hover_ref = [
+                f"<b>{h.get('scientific_name', 'Unknown')}</b><br>Sim: {h.get('similarity', 0):.2f}" 
+                for h in valid_refs
+            ]
+            
+            fig.add_trace(go.Scatter3d(
+                x=ref_coords['x'], y=ref_coords['y'], z=ref_coords['z'],
+                mode='markers',
+                marker=dict(size=6, color='#00E5FF', opacity=0.9, line=dict(width=0.5, color='white')),
+                hoverinfo='text',
+                text=hover_ref,
+                name='Genomic Neighborhood'
+            ))
+
+            # Optional: Convex Hull if enough points
+            if len(ref_coords) >= 4 and ConvexHull:
+                try:
+                    hull = ConvexHull(ref_coords[['x','y','z']].values)
+                    # For mesh3d, we need to extract vertex indices
+                    # But simpler way for ConvexHull is to just plot vertices, 
+                    # Mesh3d needs i,j,k indices which ConvexHull.simplices provides
+                    
+                    x_hull = ref_coords['x'].values
+                    y_hull = ref_coords['y'].values
+                    z_hull = ref_coords['z'].values
+                    
+                    simplices = hull.simplices
+                    
+                    fig.add_trace(go.Mesh3d(
+                        x=x_hull, y=y_hull, z=z_hull,
+                        i=simplices[:,0], j=simplices[:,1], k=simplices[:,2],
+                        color='#00E5FF', opacity=0.1,
+                        name='Phylogenetic Envelope',
+                        hoverinfo='skip'
+                    ))
+                except Exception as e:
+                    pass
+
+        # C. Novel Cluster Centers - Neon Pink #FF007A
         if not cluster_coords.empty:
             for i, row in cluster_coords.iterrows():
-                cid = cluster_map.get(i, f"Cluster {i}")
-                
-                # 1. Center Point
+                cid = cluster_map.get(i, f"Group {i}")
                 fig.add_trace(go.Scatter3d(
                     x=[row['x']], y=[row['y']], z=[row['z']],
                     mode='markers+text',
-                    marker=dict(size=10, color='#FF007A', symbol='diamond-open', line=dict(width=2)),
+                    marker=dict(size=8, color='#FF007A', symbol='diamond-open', line=dict(width=2)),
                     text=[cid],
                     textposition="top center",
                     textfont=dict(color="#FF007A", size=10),
-                    name=f"Novel Group: {cid}"
-                ))
-                
-                # 2. Holographic Sphere (Mesh3d)
-                # Create a small sphere around the centroid to represent the cluster zone
-                u, v = np.mgrid[0:2*np.pi:20j, 0:np.pi:10j]
-                r = 0.8 # Radius in PCA space
-                x_s = r * np.cos(u) * np.sin(v) + row['x']
-                y_s = r * np.sin(u) * np.sin(v) + row['y']
-                z_s = r * np.cos(v) + row['z']
-                
-                fig.add_trace(go.Mesh3d(
-                    x=x_s.flatten(), y=y_s.flatten(), z=z_s.flatten(),
-                    color='#FF007A',
-                    opacity=0.15,
-                    alphahull=0,
-                    name=f"Zone {cid}",
-                    hoverinfo='skip'
+                    name=f"NTU: {cid}"
                 ))
 
-        # --- Background Cloud (The Universe) ---
-        if not bg_coords.empty:
-             # Colors by Phylum if available
-             bg_phylums = [r.get('phylum', 'Unknown') for r in valid_bg]
-             # Light opacity, smaller points
-             
-             fig.add_trace(go.Scatter3d(
-                x=bg_coords['x'], y=bg_coords['y'], z=bg_coords['z'],
-                mode='markers',
-                marker=dict(
-                    size=2,
-                    color='#334155', # Slate Slate (Dark Grey-Blue) for background
-                    opacity=0.3
-                ),
-                text=[f"{r.get('species', 'Unk')}" for r in valid_bg],
-                hoverinfo='text',
-                name='Known Atlas'
+        # D. The Query - Dynamic Color
+        # Pink if Novel, Green if Known
+        c_q = '#FF007A' if is_novel else '#00FF7F' 
+        s_q = 'diamond' if is_novel else 'circle'
+        status_txt = "NOVEL LINEAGE" if is_novel else "KNOWN SPECIES"
+        
+        fig.add_trace(go.Scatter3d(
+            x=[query_coords['x']], y=[query_coords['y']], z=[query_coords['z']],
+            mode='markers',
+            marker=dict(size=15, color=c_q, symbol=s_q, line=dict(width=2, color='white'), opacity=1.0),
+            name='Active Sequence',
+            text=[f"<b>QUERY TARGET</b><br>{query_display_name}<br>Status: {status_txt}"],
+            hoverinfo='text'
+        ))
+
+        # E. Evolutionary Line (Visual Guide from Query to Nearest Ref)
+        if not ref_coords.empty:
+            # Re-find the closest ref in PCA space (Euclidean)
+            # This is purely visual
+            q_pt = np.array([query_coords['x'], query_coords['y'], query_coords['z']])
+            refs_pts = ref_coords[['x', 'y', 'z']].values
+            
+            dists = np.linalg.norm(refs_pts - q_pt, axis=1)
+            nearest_idx = np.argmin(dists)
+            nearest = ref_coords.iloc[nearest_idx]
+
+            fig.add_trace(go.Scatter3d(
+                x=[query_coords['x'], nearest['x']],
+                y=[query_coords['y'], nearest['y']],
+                z=[query_coords['z'], nearest['z']],
+                mode='lines',
+                line=dict(color='white', width=2, dash='dot'),
+                hoverinfo='skip',
+                showlegend=False
             ))
 
-        # --- Reference Hits (Nearest Neighbors) ---
-        # assigning colors based on Phylum 
-        phylums = [h.get('phylum', 'Unknown') for h in valid_refs]
-        unique_phylums = list(set(phylums))
-        color_map = {p: self.palette[i % len(self.palette)] for i, p in enumerate(unique_phylums)}
-        colors = [color_map.get(p, "#888") for p in phylums]
-        
-        hover_texts = [
-            f"<b>{h.get('Scientific_Name', h.get('species', 'Unknown'))}</b><br>Phylum: {h.get('phylum', 'Unknown')}<br>Sim: {h.get('similarity', 0):.2f}"
-            for h in valid_refs
-        ]
-
-        # Nearest Hits get bigger brighter dots
-        fig.add_trace(go.Scatter3d(
-            x=ref_coords['x'], y=ref_coords['y'], z=ref_coords['z'],
-            mode='markers',
-            marker=dict(
-                size=6,
-                color=colors,
-                opacity=0.9,
-                line=dict(width=1, color='#FFFFFF')
-            ),
-            text=hover_texts,
-            hoverinfo='text',
-            name='Top Hits'
-        ))
-
-        # --- Query Point ---
-        q_color = "#FF007A" if is_novel else "#00E5FF" # Pink = Novel, Cyan = Known
-        q_symbol = "diamond"
-        
-        fig.add_trace(go.Scatter3d(
-            x=[query_coords['x']], 
-            y=[query_coords['y']], 
-            z=[query_coords['z']],
-            mode='markers',
-            marker=dict(
-                size=12,
-                color=q_color,
-                symbol=q_symbol,
-                line=dict(color='#FFFFFF', width=2),
-                opacity=1.0
-            ),
-            text=[f"<b>QUERY TARGET</b><br>{query_display_name}<br>Status: {'NOVEL' if is_novel else 'KNOWN'}"],
-            hoverinfo='text',
-            name='Query Sequence'
-        ))
-
-        # --- Evolutionary Path (Wow Factor) ---
-        # Connect Query to Nearest Neighbor (Ref index 0)
-        nearest_coords = ref_coords.iloc[0]
-        
-        # Calculate visual euclidean distance in PCA space
-        dist_3d = np.linalg.norm(
-            np.array([query_coords['x'], query_coords['y'], query_coords['z']]) - 
-            np.array([nearest_coords['x'], nearest_coords['y'], nearest_coords['z']])
-        )
-
-        fig.add_trace(go.Scatter3d(
-            x=[query_coords['x'], nearest_coords['x']],
-            y=[query_coords['y'], nearest_coords['y']],
-            z=[query_coords['z'], nearest_coords['z']],
-            mode='lines+text',
-            line=dict(
-                color='#FFFFFF', 
-                width=3, 
-                dash='dot'
-            ),
-            text=[f"", f"Div: {dist_3d:.2f}"], 
-            textposition="top center",
-            textfont=dict(color="#FFFFFF", size=10),
-            name='Evolutionary Path'
-        ))
-
-        # 5. Stylization (Holographic)
+        # Layout Styling - Scientific / Lab
         fig.update_layout(
             scene=dict(
-                xaxis=dict(showbackground=False, showgrid=True, gridcolor="#334155", zeroline=False, showticklabels=False, title='PC1'),
-                yaxis=dict(showbackground=False, showgrid=True, gridcolor="#334155", zeroline=False, showticklabels=False, title='PC2'),
-                zaxis=dict(showbackground=False, showgrid=True, gridcolor="#334155", zeroline=False, showticklabels=False, title='PC3'),
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False),
+                zaxis=dict(visible=False),
                 bgcolor='rgba(0,0,0,0)'
             ),
-            paper_bgcolor='#0A0F1E', # Abyss Blue Match
-            font_color="#E2E8F0",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
             margin=dict(l=0, r=0, b=0, t=0),
-            showlegend=True,
             legend=dict(
-                yanchor="top", y=0.9,
-                xanchor="left", x=0.05,
-                bgcolor="rgba(10, 15, 30, 0.6)"
+                x=0.05, y=0.95,
+                font=dict(color='#94A3B8', family="Consolas"),
+                bgcolor='rgba(15, 23, 42, 0.8)',
+                bordercolor='#334155',
+                borderwidth=1
             )
         )
         
         return fig
-
-if __name__ == "__main__":
-    # Smoke Test
-    viz = ManifoldVisualizer()
-    
-    # Mock Data
-    mock_refs = [{'vector': np.random.rand(768).tolist(), 'species': f'Specimen_{i}', 'phylum': 'Mollusca'} for i in range(50)]
-    mock_query = np.random.rand(768).tolist()
-    
-    fig = viz.create_plot(mock_refs, mock_query, "Test Query", True)
-    print("Figure Generated Successfully.")

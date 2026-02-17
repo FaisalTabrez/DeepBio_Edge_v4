@@ -22,10 +22,10 @@ def render_docs():
     """, unsafe_allow_html=True)
 
     # --- Section 1: The Scientific Challenge ---
-    st.markdown("## 1. 🌊 The Scientific Challenge: The Abyss Gap")
+    st.markdown("## 1. THE SCIENTIFIC CHALLENGE: THE ABYSS GAP")
     
     st.info("""
-    ### ⚠️ The Trinity of Abyssal Bottlenecks
+    ### THE TRINITY OF ABYSSAL BOTTLENECKS
     Current taxonomic methods fail in the deep ocean due to three critical systemic failures:
     
     1.  **The Reference Gap**: Less than **1%** of deep-sea marine nematodes and meiofauna have sequenced reference genomes. BLAST checks against "empty libraries".
@@ -39,7 +39,7 @@ def render_docs():
     col_ai1, col_ai2 = st.columns([1.5, 1])
     
     with col_ai1:
-        st.markdown("## 2. 🧠 The AI Engine: DNA as a Language")
+        st.markdown("## 2. THE AI ENGINE: DNA AS A LANGUAGE")
         st.markdown("""
         **Foundation Model: Nucleotide Transformer (v2-50M)**
         
@@ -67,13 +67,13 @@ def render_docs():
     st.markdown("---")
 
     # --- Section 3: The Triple-Tier Hybrid Engine ---
-    st.markdown("## 3. 🛡️ The Triple-Tier Hybrid Engine")
+    st.markdown("## 3. THE TRIPLE-TIER HYBRID ENGINE")
     st.markdown("To solve the *Metadata Crisis*, we don't trust a single source. We use a consensus mechanism:")
 
     c1, c2, c3 = st.columns(3)
     
     with c1:
-        st.markdown("### 🥇 TIER 1: Consensus")
+        st.markdown("### TIER 1: CONSENSUS")
         st.markdown("""
         **"The Democracy of Vectors"**
         We query the nearest **50 neighbors** in the specific 18S/COI latent space.
@@ -83,7 +83,7 @@ def render_docs():
         """)
         
     with c2:
-        st.markdown("### 🥈 TIER 2: The Oracle")
+        st.markdown("### TIER 2: THE ORACLE")
         st.markdown("""
         **"The Marine Specialist"**
         Cross-validation against **WoRMS (World Register of Marine Species)**.
@@ -93,7 +93,7 @@ def render_docs():
         """)
         
     with c3:
-        st.markdown("### 🥉 TIER 3: Lineage")
+        st.markdown("### TIER 3: LINEAGE")
         st.markdown("""
         **"The Phylogeny Builder"**
         Reconstruction of full lineage tree using **TaxonKit**.
@@ -105,7 +105,7 @@ def render_docs():
     st.markdown("---")
 
     # --- Section 4: The 'Dark Taxa' Protocol ---
-    st.markdown("## 4. 🔦 The 'Dark Taxa' Protocol")
+    st.markdown("## 4. THE 'DARK TAXA' PROTOCOL")
     st.markdown("How we handle the unknown represents our biggest innovation. We don't discard 'No Hits'—we cluster them.")
 
     # Color Decoding with Visuals
@@ -114,7 +114,7 @@ def render_docs():
     with col_proto1:
         st.markdown("""
         <div style="background: rgba(0, 229, 255, 0.1); border-left: 5px solid #00E5FF; padding: 15px; margin-bottom: 20px;">
-            <h3 style="color: #00E5FF; margin: 0;">🩵 CONFIRMED MARINE TAXON</h3>
+            <h3 style="color: #00E5FF; margin: 0;">CONFIRMED MARINE TAXON</h3>
             <p style="margin: 5px 0; color: #E2E8F0;">
                 High confidence match (>90%) to existing reference atlas. Validated by WoRMS as marine.
             </p>
@@ -124,14 +124,14 @@ def render_docs():
     with col_proto2:
         st.markdown("""
         <div style="background: rgba(255, 0, 122, 0.1); border-left: 5px solid #FF007A; padding: 15px; margin-bottom: 20px;">
-            <h3 style="color: #FF007A; margin: 0;">🩷 POTENTIAL DARK TAXON (NTU)</h3>
+            <h3 style="color: #FF007A; margin: 0;">POTENTIAL DARK TAXON (NTU)</h3>
             <p style="margin: 5px 0; color: #E2E8F0;">
                 <b>Novel Taxonomic Unit.</b> Strong biological signal (high quality read), but <85% similarity to <i>any</i> known Earth organism.
             </p>
         </div>
         """, unsafe_allow_html=True)
         
-    st.markdown("### 🔬 Unsupervised Discovery (HDBSCAN)")
+    st.markdown("### UNSUPERVISED DISCOVERY (HDBSCAN)")
     st.markdown("""
     Passes marked as <span style='color:#FF007A'>**Dark Taxa**</span> are fed into the **Discovery Engine**:
     1.  **Density-Based Clustering**: We look for 'islands' of unknown sequences in the latent space.
