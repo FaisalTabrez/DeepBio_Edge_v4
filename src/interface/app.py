@@ -37,6 +37,7 @@ from src.edge.taxonomy import TaxonomyEngine
 from src.edge.discovery import DiscoveryEngine
 from src.edge.parser import stream_sequences
 from src.interface.visualizer import ManifoldVisualizer
+from src.interface.docs import render_docs
 
 # ==========================================
 # @UX-Visionary: Global-BioScan Console Config
@@ -699,67 +700,18 @@ with tab_report:
 
 # --- TAB 5: DOCUMENTATION ---
 with tab_docs:
-    col_d1, col_d2 = st.columns([1, 3])
-    
-    with col_d1:
-        st.markdown("### 📚 Guide")
-        st.markdown("---")
-        st.markdown("""
-        **1. The Problem**
-        Legacy tools (BLAST) rely on exact string matching. In the deep sea, 80% of life is unknown, leading to "No Hit" results.
-        
-        **2. The Solution**
-        DeepBio uses Semantic AI (LLMs for DNA) to understand the *function* and *structure* of genes, even if the sequence is new.
-        
-        **3. Workflow**
-        - **Ingest**: Read Raw FASTA
-        - **Embed**: Convert to 768-dim Tensor
-        - **Search**: HNSW Vector Query
-        - **Resolve**: Triple-Tier Consensus
-        """)
-        
-        st.markdown("---")
-        if st.button("🚀 LAUNCH GUIDED DEMO"):
-             st.session_state.demo_mode = True
-             # Create dummy file
-             demo_path = Path("temp_demo.fasta")
-             with open(demo_path, "w") as f:
-                 f.write(">Demo_Seq_001 | 18S | Mariana Trench\nGATTACAGATTACAGATTACACCCGGGTTAAACCCGGT\n>Demo_Seq_002 | COI\nAACCGGTTTTACCCGGAAAATTTCCCGGG\n")
-             st.session_state.demo_file_path = str(demo_path.absolute())
-             st.success("Demo Loaded! Go to 'MONITOR & SCAN' tab and click 'INITIATE STREAM'.")
+    render_docs()
 
-    with col_d2:
-        st.markdown('<div class="glass-panel">', unsafe_allow_html=True)
-        st.subheader("🧬 System Architecture Pipeline")
-        
-        st.markdown("""
-        ```mermaid
-        graph LR
-            A[🧬 Raw DNA Stream] --> B(🧬 Nucleotide Transformer)
-            B -->|768-dim Vector| C{🧠 Latent Space}
-            C -->|KNN Search| D[🗄️ Atlas (LanceDB)]
-            D --> E[🔎 Triple-Tier Resolver]
-            E --> F[✅ Consensus ID]
-            E --> G[⚠️ Oracle Check]
-            E --> H[🌌 Novel Cluster]
-        ```
-        """, unsafe_allow_html=True)
-        
-        st.markdown("### 🏷️ Taxonomy Legend")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.markdown("#### <span style='color:#00E5FF'>🟦 KNOWN</span>", unsafe_allow_html=True)
-            st.caption("Matches global records (NCBI/BoLD/WoRMS) > 97% Identity.")
-        with c2:
-             st.markdown("#### <span style='color:#7000FF'>🟪 DIVERGENT</span>", unsafe_allow_html=True)
-             st.caption("Likely new species of a known Genus. (85-97% Similarity).")
-        with c3:
-             st.markdown("#### <span style='color:#FF007A'>🟥 DARK TAXA</span>", unsafe_allow_html=True)
-             st.caption("Completely novel lineage. High scientific value. (< 85% Sim).")
-             
-        st.markdown('</div>', unsafe_allow_html=True)
-        # fig_sun was removed in previous edit, removing referencing to it
-        st.markdown('</div>', unsafe_allow_html=True)
+    # Legacy Demo Launcher (Moved to footer of docs)
+    st.markdown("### 🧪 Simulation Sandbox")
+    if st.button("🚀 LAUNCH GUIDED DEMO (Mariana Trench Dataset)"):
+            st.session_state.demo_mode = True
+            # Create dummy file
+            demo_path = Path("temp_demo.fasta")
+            with open(demo_path, "w") as f:
+                f.write(">Demo_Seq_001 | 18S | Mariana Trench\nGATTACAGATTACAGATTACACCCGGGTTAAACCCGGT\n>Demo_Seq_002 | COI\nAACCGGTTTTACCCGGAAAATTTCCCGGG\n")
+            st.session_state.demo_file_path = str(demo_path.absolute())
+            st.success("Demo Loaded! Go to 'MONITOR & SCAN' tab and click 'INITIATE STREAM'.")
         
     with col_rep2:
         st.info("Report Generation Module Initialized. PDF Export Disabled in Console Mode.")
