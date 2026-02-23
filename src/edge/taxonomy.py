@@ -140,7 +140,15 @@ class TaxonomyEngine:
                 return f"{most_common_gen} sp. (Genus Match)", 0.75
 
         # Fallback to Top Hit if very strong
-        top_sim = matches[0].get('similarity', 0)
+        raw_sim = matches[0].get('similarity', 0)
+        top_sim = 0.0
+        if isinstance(raw_sim, np.ndarray):
+             if raw_sim.size == 1: top_sim = float(raw_sim.item())
+        elif isinstance(raw_sim, list):
+             if len(raw_sim) == 1: top_sim = float(raw_sim[0])
+        else:
+             top_sim = float(raw_sim)
+
         if top_sim > 0.97:
              return matches[0].get('Scientific_Name', matches[0].get('species', 'Unknown')), 0.95
              
@@ -194,8 +202,21 @@ class TaxonomyEngine:
              return {"display_name": "No Data", "status": "Error", "is_novel": False, "confidence": 0}
 
         top_hit = matches[0]
-        top_sim = top_hit.get('similarity', 0)
+        # Ensure similarity is scalar
+        raw_sim = top_hit.get('similarity', 0)
+        if isinstance(raw_sim, (np.ndarray, list)):
+            if isinstance(raw_sim, np.ndarray) and raw_sim.size == 1:
+                top_sim = float(raw_sim.item())
+            elif isinstance(raw_sim, list) and len(raw_sim) == 1:
+                top_sim = float(raw_sim[0])
+            else:
+                 logger.warning("Ambiguous similarity score format. Defaulting to 0.0")
+                 top_sim = 0.0
+        else:
+            top_sim = float(raw_sim)
+
         raw_name = top_hit.get('Scientific_Name', top_hit.get('species', 'Unknown'))
+
         
         # --- TIER 1: VECTOR CONSENSUS ---
         consensus_name, consensus_conf = self.resolve_consensus(matches)
@@ -244,21 +265,36 @@ class TaxonomyEngine:
         is_novel = False
         status_label = "Confirmed ID"
         
-        if top_sim < 0.85 and not worms_info:
+        # Ensure top_sim is a scalar float
+        # Already handled above, but double check
+        if isinstance(top_sim, np.ndarray):
+             if top_sim.size == 1:
+                 top_sim = float(top_sim.item())
+             else:
+                 top_sim = float(top_sim[0]) if top_sim.size > 0 else 0.0
+        
+        # Ensure worms_info is treated as boolean dict check safely
+        has_worms = bool(worms_info)
+        
+        if top_sim < 0.85 and not has_worms:
             is_novel = True
             status_label = "POTENTIAL NOVEL TAXON"
             final_name = f"Cryptic {final_name} sp."
         elif top_sim < 0.94:
             status_label = "Divergent / Deep Variant"
+
             
+        if isinstance(is_novel, np.ndarray):
+            is_novel = bool(is_novel.item()) if is_novel.size == 1 else False
+
         return {
             "display_name": final_name,
             "scientific_name": final_name,
             "status": status_label,
-            "is_novel": is_novel,
-            "confidence": top_sim,
-            "confidence_pct": top_sim * 100,
-            "consensus_score": consensus_conf,
+            "is_novel": bool(is_novel),
+            "confidence": float(top_sim),
+            "confidence_pct": float(top_sim * 100),
+            "consensus_score": float(consensus_conf),
             "lineage": lineage_str,
             "source_method": source,
             "vector": top_hit.get('vector') if top_hit.get('vector') is not None else top_hit.get('vectors')

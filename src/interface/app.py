@@ -503,7 +503,8 @@ with tab_monitor:
                     progress_text.text("Analysis Complete.")
                     
                     # Run Discovery Engine Immediately
-                    if st.session_state.scan_results_buffer:
+                    # Explicit length check to avoid ambiguity if buffer became array-like
+                    if len(st.session_state.scan_results_buffer) > 0:
                          try:
                              clusters = discovery.analyze_novelty(st.session_state.scan_results_buffer)
                              st.session_state.novel_clusters = clusters
@@ -527,11 +528,17 @@ with tab_monitor:
         # Container for scrollable results
         results_container = st.container(height=600)
         
-        if st.session_state.scan_results_buffer:
+        if st.session_state.scan_results_buffer and len(st.session_state.scan_results_buffer) > 0:
             with results_container:
                 for hit in st.session_state.scan_results_buffer:
                     # Determine Styling
-                    is_novel = hit.get('is_novel', False)
+                    raw_novel = hit.get('is_novel', False)
+                    is_novel = False
+                    if isinstance(raw_novel, np.ndarray):
+                         is_novel = bool(raw_novel.item()) if raw_novel.size == 1 else raw_novel.any()
+                    else:
+                         is_novel = bool(raw_novel)
+
                     card_class = "discovery-card-novel" if is_novel else "discovery-card-known"
                     
                     # Icons & Labels

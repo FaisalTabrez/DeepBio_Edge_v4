@@ -85,9 +85,15 @@ class DiscoveryEngine:
         # Check for valid vector data. Use direct None check to avoid numpy ambiguity if 'vector' is array
         dark_taxa = []
         for item in session_buffer:
-             is_novel = item.get('is_novel', False)
+             raw_novel = item.get('is_novel', False)
+             is_novel_bool = False
+             if isinstance(raw_novel, np.ndarray):
+                 is_novel_bool = bool(raw_novel.item()) if raw_novel.size == 1 else raw_novel.any()
+             else:
+                 is_novel_bool = bool(raw_novel)
+
              vec = item.get('vector')
-             if is_novel and vec is not None:
+             if is_novel_bool and vec is not None:
                  dark_taxa.append(item)
         
         if len(dark_taxa) < self.min_cluster_size:

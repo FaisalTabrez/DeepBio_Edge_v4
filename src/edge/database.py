@@ -114,6 +114,9 @@ class AtlasManager:
             # LanceDB returns '_distance'. For L2: Similarity = 1 / (1 + distance)
             results['similarity'] = 1 / (1 + results['_distance'])
             
+            # Ensure similarity column is float64 to avoid ambiguity if single-element series behaves weirdly
+            results['similarity'] = results['similarity'].astype(float)
+            
             # @Data-Ops: Schema Mapping
             # Map 'species' to 'Scientific_Name' for downstream compatibility
             if 'species' in results.columns and 'Scientific_Name' not in results.columns:

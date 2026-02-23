@@ -279,9 +279,15 @@ class ManifoldVisualizer:
 
         # D. The Query - Dynamic Color
         # Pink if Novel, Green if Known
-        c_q = '#FF007A' if is_novel else '#00FF7F' 
-        s_q = 'diamond' if is_novel else 'circle'
-        status_txt = "NOVEL LINEAGE" if is_novel else "KNOWN SPECIES"
+        
+        # Defensive check for numpy bool (ambiguity error fix)
+        is_novel_safe = is_novel
+        if isinstance(is_novel, np.ndarray):
+            is_novel_safe = bool(is_novel.item()) if is_novel.size == 1 else is_novel.any()
+        
+        c_q = '#FF007A' if is_novel_safe else '#00FF7F' 
+        s_q = 'diamond' if is_novel_safe else 'circle'
+        status_txt = "NOVEL LINEAGE" if is_novel_safe else "KNOWN SPECIES"
         
         fig.add_trace(go.Scatter3d(
             x=[query_coords['x']], y=[query_coords['y']], z=[query_coords['z']],
