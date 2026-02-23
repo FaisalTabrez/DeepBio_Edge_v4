@@ -165,11 +165,21 @@ class TaxonomyEngine:
         if self.worms_cache.empty:
             return {}
 
+        # Ensure scientific_name is a string before checking
+        if not isinstance(scientific_name, str):
+            return {}
+
         # 1. Exact Match (Fast)
         scientific_name = scientific_name.strip()
-        hit = self.worms_cache[self.worms_cache['ScientificName'].str.lower() == scientific_name.lower()]
+        
+        # Defensive check against empty DataFrame boolean eval
+        try:
+             hit = self.worms_cache[self.worms_cache['ScientificName'].str.lower() == scientific_name.lower()]
+        except Exception:
+             return {}
         
         # 2. Fuzzy Match (If rapidfuzz available and no exact hit)
+        # Use explicit .empty check
         if hit.empty and process:
             # Get list of all names
             all_names = self.worms_cache['ScientificName'].tolist()

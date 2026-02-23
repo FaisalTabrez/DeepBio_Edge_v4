@@ -465,27 +465,46 @@ with tab_monitor:
                         
                         # 1. Embed
                         vector = embedder.embed_sequences([raw_seq])
+                        # log_event(f"DEBUG: Vector shape: {vector.shape}")
                         
                         # 2. Search
                         # Fetch larger set for Viz (200), slice for Feed (5)
                         results_viz = atlas.query_vector(vector, top_k=200)
+                        # log_event(f"DEBUG: Search returned {len(results_viz)} results")
                         
                         # 3. Resolve (@Bio-Taxon Triple-Tier Logic)
                         # We extract the Top 5 candidates for Consensus & Oracle verification
-                        formatted_results = taxonomy.format_search_results(results_viz[:5], gene_type=gene_selector)
+                        # Explicitly slice list to avoid ambiguity
+                        top_candidates = results_viz[:5] if isinstance(results_viz, list) else []
+                        
+                        # Add extra safety check on candidates
+                        # If somehow query_vector returns weird stuff
+                        if not top_candidates and isinstance(results_viz, list) and results_viz:
+                             top_candidates = [results_viz[0]] # Just take top 1 if slice failed? NO.
+                        
+                        formatted_results = []
+                        if top_candidates:
+                             try:
+                                 formatted_results = taxonomy.format_search_results(top_candidates, gene_type=gene_selector)
+                             except Exception as tax_e:
+                                 logger.error(f"Taxonomy Formatting Failed: {tax_e}")
+                                 st.error(f"Taxonomy Error: {tax_e}")
                         
                         # Add to Buffer (Prepend for latest on top)
-                        if formatted_results:
+                        if formatted_results and isinstance(formatted_results, list) and len(formatted_results) > 0:
                             top_hit = formatted_results[0]
                             top_hit['query_id'] = seq_id # Track query ID
                             st.session_state.scan_results_buffer.insert(0, top_hit)
                             
-                            # Store Context for Tab 2 Visualizer
-                            st.session_state.viz_context = {
-                                'ref_hits': results_viz,
-                                'query_vec': vector,
-                                'display_name': top_hit['display_name'],
-                                'is_novel': top_hit['is_novel']
+# Ensure vector is stored flat for viz
+                        vec_flat = vector.flatten() if isinstance(vector, np.ndarray) else vector
+
+                        # Store Context for Tab 2 Visualizer
+                        st.session_state.viz_context = {
+                            'ref_hits': results_viz,
+                            'query_vec': vec_flat,
+                            'display_name': top_hit['display_name'],
+                            'is_novel': bool(top_hit['is_novel']) # Double check
                             }
                             
                         # Real-time UI Update hack (rerun not ideal in loop, so we rely on session state being read next pass or manual container update if possible)
