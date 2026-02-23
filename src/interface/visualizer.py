@@ -125,7 +125,7 @@ class ManifoldVisualizer:
                    query_display_name: str,
                    is_novel: bool,
                    atlas_manager: Any,
-                   novel_clusters: List[Dict] = None) -> go.Figure:
+                   novel_clusters: Optional[List[Dict]] = None) -> go.Figure:
         """
         Generates the Plotly 3D Figure using Real Data.
         """

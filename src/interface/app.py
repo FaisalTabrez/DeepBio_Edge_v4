@@ -320,7 +320,7 @@ tab_monitor, tab_visualizer, tab_discovery, tab_report, tab_docs = st.tabs([
     "GENOMIC MANIFOLD", 
     "TAXONOMIC INFERENCE", 
     "NOVELTY DISCOVERY",
-    "EXPEDITION MANUAL"
+    "DOCUMENTATION"
 ])
 
 from src.edge.config_init import LOGS_PATH
@@ -722,17 +722,5 @@ with tab_report:
 # --- TAB 5: DOCUMENTATION ---
 with tab_docs:
     render_docs()
-
-    # Legacy Demo Launcher (Moved to footer of docs)
-    st.markdown("### 🧪 Simulation Sandbox")
-    if st.button("🚀 LAUNCH GUIDED DEMO (Mariana Trench Dataset)"):
-            st.session_state.demo_mode = True
-            # Create dummy file
-            demo_path = Path("temp_demo.fasta")
-            with open(demo_path, "w") as f:
-                f.write(">Demo_Seq_001 | 18S | Mariana Trench\nGATTACAGATTACAGATTACACCCGGGTTAAACCCGGT\n>Demo_Seq_002 | COI\nAACCGGTTTTACCCGGAAAATTTCCCGGG\n")
-            st.session_state.demo_file_path = str(demo_path.absolute())
-            st.success("Demo Loaded! Go to 'MONITOR & SCAN' tab and click 'INITIATE STREAM'.")
-        
-    with col_rep2:
-        st.info("Report Generation Module Initialized. PDF Export Disabled in Console Mode.")
+    
+    # End of Docs

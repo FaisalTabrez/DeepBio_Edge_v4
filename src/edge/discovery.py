@@ -40,16 +40,19 @@ class DiscoveryEngine:
         self.min_cluster_size = 2 # Optimized for small batch "Edge" discovery
         self.metric = 'euclidean'
         
-        if not HAS_HDBSCAN and DBSCAN is None:
+        if not HAS_HDBSCAN and (DBSCAN is None):
             logger.warning("No clustering libraries found (hdbscan/sklearn). Discovery disabled.")
             self.mode = "DISABLED"
         elif HAS_HDBSCAN:
             self.mode = "HDBSCAN"
             self.clusterer = hdbscan.HDBSCAN(min_cluster_size=self.min_cluster_size, metric=self.metric)
-        else:
+        elif DBSCAN is not None:
             self.mode = "DBSCAN"
             # eps=0.3 is a heuristic for normalized vector space (cosine-ish)
             self.clusterer = DBSCAN(eps=0.3, min_samples=self.min_cluster_size, metric=self.metric)
+        else:
+            self.mode = "DISABLED"
+            logger.warning("Falback logic failed. Discovery disabled.")
             
         logger.info(f"Discovery Engine Online. Mode: {self.mode}")
 
