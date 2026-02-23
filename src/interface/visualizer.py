@@ -322,9 +322,9 @@ class ManifoldVisualizer:
         # Layout Styling - Scientific / Lab
         fig.update_layout(
             scene=dict(
-                xaxis=dict(visible=False),
-                yaxis=dict(visible=False),
-                zaxis=dict(visible=False),
+                xaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title=''),
+                yaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title=''),
+                zaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title=''),
                 bgcolor='rgba(0,0,0,0)'
             ),
             paper_bgcolor='rgba(0,0,0,0)',

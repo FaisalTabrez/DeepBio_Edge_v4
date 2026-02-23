@@ -83,10 +83,14 @@ class TaxonomyEngine:
             "default": {"confirmed": 0.04, "divergent": 0.20}
         }
         
+        # Explicit check for environments that might be passed as array?? Unlikely but defensive
+        if isinstance(environment, (np.ndarray, list)):
+            environment = str(environment[0]) if len(environment) > 0 else "Deep Sea"
+            
         selected = thresholds.get(gene_type, thresholds["default"]).copy()
         
         # Hydrothermal Vents have high endemism -> lower 'divergent' bar
-        if environment == "Hydrothermal Vent":
+        if str(environment) == "Hydrothermal Vent":
              selected["divergent"] *= 0.9 
              
         return selected
@@ -114,7 +118,22 @@ class TaxonomyEngine:
             return "Unknown", 0.0
 
         # Normal voting on Full Name first
-        names = [m.get('Scientific_Name', m.get('species', 'Unknown')) for m in matches]
+        # Defensive check for matches if passed as non-list-of-dicts (rare pandas behavior)
+        if hasattr(matches, "to_dict"):
+             matches = matches.to_dict('records')
+
+        names = []
+        for m in matches:
+             # Ensure m is a dict
+             if not isinstance(m, dict): continue
+             
+             val = m.get('Scientific_Name', m.get('species', 'Unknown'))
+             if isinstance(val, (np.ndarray, list)):
+                 if len(val) > 0: names.append(str(val[0]))
+                 else: names.append("Unknown")
+             else:
+                 names.append(str(val))
+                 
         top_k = names[:5] # Look at top 5 now
         if not top_k:
              return "Unknown", 0.0
@@ -124,36 +143,60 @@ class TaxonomyEngine:
         most_common_sp, count_sp = counts.most_common(1)[0]
         
         # If > 3 votes (out of 5) for exact species -> Strong Match
-        if count_sp >= 3:
-            return most_common_sp, count_sp / len(top_k)
+        # Defensive integer typing for counts
+        count_sp_int = int(count_sp)
+        if count_sp_int >= 3:
+            return most_common_sp, count_sp_int / len(top_k)
 
         # 2. Genus Level Consensus (Fallback)
         # Extract Genera
-        genera = [n.split()[0] for n in top_k if len(n.split()) > 0]
+        # Safe extraction if strings are wrapped in arrays
+        genera = []
+        for n in top_k:
+             nn = str(n)
+             parts = nn.split()
+             if len(parts) > 0:
+                 genera.append(parts[0])
+        
         c_gen = Counter(genera)
         
-        if c_gen:
+        # Explicit length check for Counter to avoid ambiguity
+        if len(c_gen) > 0:
             most_common_gen, count_gen = c_gen.most_common(1)[0]
+            count_gen_int = int(count_gen)
             # 4/5 Policy
-            if count_gen >= 4:
+            if count_gen_int >= 4:
                 return f"{most_common_gen} sp. (Genus Candidate)", 0.90 # High confidence in Genus
-            elif count_gen >= 3:
+            elif count_gen_int >= 3:
                 return f"{most_common_gen} sp. (Genus Match)", 0.75
-
+            
         # Fallback to Top Hit if very strong
         raw_sim = matches[0].get('similarity', 0)
         top_sim = 0.0
-        if isinstance(raw_sim, np.ndarray):
-             if raw_sim.size == 1: top_sim = float(raw_sim.item())
-        elif isinstance(raw_sim, list):
-             if len(raw_sim) == 1: top_sim = float(raw_sim[0])
+        if isinstance(raw_sim, (np.ndarray, list)):
+             if len(raw_sim) > 0: 
+                 if isinstance(raw_sim, np.ndarray): top_sim = float(raw_sim.item())
+                 else: top_sim = float(raw_sim[0])
         else:
              top_sim = float(raw_sim)
 
         if top_sim > 0.97:
-             return matches[0].get('Scientific_Name', matches[0].get('species', 'Unknown')), 0.95
+             # Ensure returned name is scalar
+             best_name_raw = matches[0].get('Scientific_Name', matches[0].get('species', 'Unknown'))
+             if isinstance(best_name_raw, (np.ndarray, list)):
+                 best_name = str(best_name_raw[0]) if len(best_name_raw) > 0 else "Unknown"
+             else:
+                 best_name = str(best_name_raw)
+
+             return best_name, 0.95
              
-        return most_common_sp, count_sp / len(top_k)
+        # Ensure most_common_sp is string
+        if isinstance(most_common_sp, (np.ndarray, list)):
+            most_common_sp = str(most_common_sp[0]) if len(most_common_sp) > 0 else "Unknown"
+        else:
+            most_common_sp = str(most_common_sp)
+            
+        return most_common_sp, count_sp_int / len(top_k)
 
     def validate_worms(self, scientific_name: str) -> Dict[str, str]:
         """
@@ -170,26 +213,40 @@ class TaxonomyEngine:
             return {}
 
         # 1. Exact Match (Fast)
-        scientific_name = scientific_name.strip()
+        scientific_name = str(scientific_name).strip()
         
         # Defensive check against empty DataFrame boolean eval
         try:
-             hit = self.worms_cache[self.worms_cache['ScientificName'].str.lower() == scientific_name.lower()]
-        except Exception:
+             # Ensure we compare scalar string
+             mask = self.worms_cache['ScientificName'].str.lower() == scientific_name.lower()
+             hit = self.worms_cache[mask]
+        except Exception as e:
+             # logger.warning(f"WoRMS Filter Error: {e}")
              return {}
         
         # 2. Fuzzy Match (If rapidfuzz available and no exact hit)
         # Use explicit .empty check
         if hit.empty and process:
             # Get list of all names
-            all_names = self.worms_cache['ScientificName'].tolist()
+            # SAFEGUARD: Ensure all_names is a list of strings, dropping ambiguous types
+            all_names_raw = self.worms_cache['ScientificName'].tolist()
+            all_names = [str(n) for n in all_names_raw if isinstance(n, (str, float, int))]
+            
             # Extract one best match with score
             # limit score > 90 to be safe
             fuzzy_res = process.extractOne(scientific_name, all_names)
-            if fuzzy_res and fuzzy_res[1] > 90: # Score > 90/100
-                best_match_name = fuzzy_res[0]
-                logger.info(f"Fuzzy Corrected: {scientific_name} -> {best_match_name} ({fuzzy_res[1]})")
-                hit = self.worms_cache[self.worms_cache['ScientificName'] == best_match_name]
+            
+            # Defensive check on fuzzy_res structure
+            if fuzzy_res:
+                score = fuzzy_res[1]
+                # If score is array for some reason (rare but possible with some libraries)
+                if isinstance(score, (np.ndarray, list)):
+                     score = float(score[0]) if len(score) > 0 else 0.0
+                
+                if score > 90: # Score > 90/100
+                    best_match_name = fuzzy_res[0]
+                    # logger.info(f"Fuzzy Corrected: {scientific_name} -> {best_match_name} ({score})")
+                    hit = self.worms_cache[self.worms_cache['ScientificName'] == best_match_name]
 
         if not hit.empty:
             rec = hit.iloc[0]
@@ -209,6 +266,12 @@ class TaxonomyEngine:
         @Bio-Taxon Main Logic Loop: Triple-Tier Resolution.
         Returns a rich 'Identity Card' dictionary.
         """
+        # Defensive: Handle DataFrame passed as list
+        if hasattr(matches, "empty"): # Is likely a DataFrame
+             if matches.empty:
+                 return {"display_name": "No Data", "status": "Error", "is_novel": False, "confidence": 0}
+             matches = matches.to_dict('records')
+             
         if not matches:
              return {"display_name": "No Data", "status": "Error", "is_novel": False, "confidence": 0}
 
@@ -226,17 +289,29 @@ class TaxonomyEngine:
         else:
             top_sim = float(raw_sim)
 
-        raw_name = top_hit.get('Scientific_Name', top_hit.get('species', 'Unknown'))
+        raw_name_val = top_hit.get('Scientific_Name', top_hit.get('species', 'Unknown'))
+        if isinstance(raw_name_val, (np.ndarray, list)):
+             raw_name = str(raw_name_val[0]) if len(raw_name_val) > 0 else "Unknown"
+        else:
+             raw_name = str(raw_name_val)
 
-        
         # --- TIER 1: VECTOR CONSENSUS ---
         consensus_name, consensus_conf = self.resolve_consensus(matches)
+        
+        # Ensure consensus_name is scalar string
+        if isinstance(consensus_name, (np.ndarray, list)):
+            consensus_name = str(consensus_name[0]) if len(consensus_name) > 0 else "Unknown"
+        else:
+            consensus_name = str(consensus_name)
         
         # Determine working name: If Consensus is strong Genus or better, use it.
         # Otherwise start with raw top hit.
         working_name = raw_name
-        if "Genus" in consensus_name: # It's a genus level match
-            working_name = consensus_name.split()[0] # "Bathymodiolus"
+        
+        # Safe check for substring
+        if consensus_name and "Genus" in str(consensus_name): # It's a genus level match
+            parts = str(consensus_name).split()
+            working_name = parts[0] if len(parts) > 0 else "Unknown" # "Bathymodiolus"
         elif consensus_conf > 0.8:
             working_name = consensus_name
 
@@ -248,9 +323,9 @@ class TaxonomyEngine:
         lineage_str = ""
         source = "Vector AI"
 
-        if worms_info:
+        if worms_info is not None and len(worms_info) > 0:
             # Oracle Spoke!
-            final_name = worms_info['ScientificName'] # Use the clean Oracle name
+            final_name = worms_info.get('ScientificName', final_name) # Use the clean Oracle name
             source = "WoRMS Oracle"
             lineage_str = f"{worms_info.get('Phylum')}; {worms_info.get('Class')}; {worms_info.get('Order')}; {worms_info.get('Family')}"
         
@@ -284,8 +359,11 @@ class TaxonomyEngine:
              else:
                  top_sim = float(top_sim[0]) if top_sim.size > 0 else 0.0
         
-        # Ensure worms_info is treated as boolean dict check safely
-        has_worms = bool(worms_info)
+        if isinstance(worms_info, pd.DataFrame):
+            # This should not happen per my validate_worms return type being Dict, but defensive
+             has_worms = not worms_info.empty
+        else:
+             has_worms = bool(worms_info)
         
         if top_sim < 0.85 and not has_worms:
             is_novel = True
@@ -295,8 +373,15 @@ class TaxonomyEngine:
             status_label = "Divergent / Deep Variant"
 
             
-        if isinstance(is_novel, np.ndarray):
-            is_novel = bool(is_novel.item()) if is_novel.size == 1 else False
+        if isinstance(is_novel, (np.ndarray, list)):
+             if isinstance(is_novel, np.ndarray):
+                 is_novel = bool(is_novel.item()) if is_novel.size == 1 else is_novel.any()
+             else:
+                 is_novel = bool(is_novel[0]) if len(is_novel) > 0 else False
+
+        vector_data = top_hit.get('vector') 
+        if vector_data is None:
+             vector_data = top_hit.get('vectors')
 
         return {
             "display_name": final_name,
@@ -308,13 +393,18 @@ class TaxonomyEngine:
             "consensus_score": float(consensus_conf),
             "lineage": lineage_str,
             "source_method": source,
-            "vector": top_hit.get('vector') if top_hit.get('vector') is not None else top_hit.get('vectors')
+            "vector": vector_data
         }
 
     def format_search_results(self, raw_hits: List[Dict], gene_type: str="COI") -> List[Dict]:
         """
         Main Pipeline: Converts raw Vector DB hits into Rich Discovery Cards.
         """
+        # Handle DataFrame input defensively
+        if hasattr(raw_hits, "to_dict"):
+             if raw_hits.empty: return []
+             raw_hits = raw_hits.to_dict('records')
+
         if not raw_hits:
             return []
 
@@ -323,11 +413,29 @@ class TaxonomyEngine:
         
         # Inject UI helpers
         # Map resolve_identity keys to UI expected keys (if different)
-        identity['similarity'] = raw_hits[0].get('similarity', 0)
-        identity['distance'] = 1.0 - identity['similarity']
+        # Ensure similarity is scalar
+        raw_sim = 0.0
+        if raw_hits and isinstance(raw_hits[0], dict):
+             raw_sim = raw_hits[0].get('similarity', 0.0)
+        
+        if isinstance(raw_sim, (np.ndarray, list)):
+             sim = float(raw_sim[0]) if len(raw_sim) > 0 else 0.0
+        else:
+             sim = float(raw_sim)
+
+        identity['similarity'] = sim
+        identity['distance'] = 1.0 - sim
         identity['display_lineage'] = identity['lineage']
         identity['method'] = identity['source_method']
-        identity['confidence_pct'] = f"{identity['confidence_pct']:.1f}%"
+        # identity['confidence_pct'] is float from clean resolve_identity call
+        # Defensive check just in case
+        conf_pct_raw = identity.get('confidence_pct', 0)
+        if isinstance(conf_pct_raw, (np.ndarray, list)):
+             conf_pct = float(conf_pct_raw[0]) if len(conf_pct_raw) > 0 else 0.0
+        else:
+             conf_pct = float(conf_pct_raw)
+             
+        identity['confidence_pct'] = f"{conf_pct:.1f}%"
         # Extract Phylum for visualizer coloring
         identity['phylum'] = identity['lineage'].split(';')[0] if identity['lineage'] else "Unknown"
         
@@ -339,19 +447,37 @@ class TaxonomyEngine:
         # Visualization typically wants the Top K raw hits.
         
         for i, hit in enumerate(raw_hits[1:], start=1):
-             s_name = hit.get('Scientific_Name', hit.get('species', 'Unknown'))
+             # Ensure Scientific Name is scalar string
+             s_name_raw = hit.get('Scientific_Name', hit.get('species', 'Unknown'))
+             if isinstance(s_name_raw, (list, np.ndarray)):
+                  s_name = str(s_name_raw[0]) if len(s_name_raw) > 0 else "Unknown"
+             else:
+                  s_name = str(s_name_raw)
+
+             # Ensure Similarity is scalar float
+             sim_raw = hit.get('similarity', 0.0)
+             if isinstance(sim_raw, (np.ndarray, list)):
+                  sim = float(sim_raw[0]) if len(sim_raw) > 0 else 0.0
+             else:
+                  sim = float(sim_raw)
+
+             # Handle vector safely
+             vec_data = hit.get('vector')
+             if vec_data is None:
+                 vec_data = hit.get('vectors')
+
              results.append({
                 "display_name": s_name,
                 "Scientific_Name": s_name,
-                "similarity": hit.get('similarity', 0.0),
-                "distance": 1.0 - hit.get('similarity', 0.0),
+                "similarity": sim,
+                "distance": 1.0 - sim,
                 "status": "Neighbor",
                 "is_novel": False,
                 "display_lineage": "",
                 "method": "Vector Neighbor",
-                "confidence_pct": f"{hit.get('similarity', 0)*100:.1f}%",
+                "confidence_pct": f"{sim*100:.1f}%",
                 "phylum": "Unknown",
-                "vector": hit.get('vector', None) or hit.get('vectors', None)
+                "vector": vec_data
              })
              
         return results

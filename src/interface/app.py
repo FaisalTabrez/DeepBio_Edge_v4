@@ -496,16 +496,20 @@ with tab_monitor:
                             top_hit['query_id'] = seq_id # Track query ID
                             st.session_state.scan_results_buffer.insert(0, top_hit)
                             
-# Ensure vector is stored flat for viz
-                        vec_flat = vector.flatten() if isinstance(vector, np.ndarray) else vector
+                            # Ensure vector is stored flat for viz
+                            vec_flat = vector.flatten() if isinstance(vector, np.ndarray) else vector
 
-                        # Store Context for Tab 2 Visualizer
-                        st.session_state.viz_context = {
-                            'ref_hits': results_viz,
-                            'query_vec': vec_flat,
-                            'display_name': top_hit['display_name'],
-                            'is_novel': bool(top_hit['is_novel']) # Double check
+                            # Store Context for Tab 2 Visualizer
+                            st.session_state.viz_context = {
+                                'ref_hits': results_viz,
+                                'query_vec': vec_flat,
+                                'display_name': top_hit['display_name'],
+                                'is_novel': bool(top_hit['is_novel']) # Double check
                             }
+                        else:
+                            # Handle case where taxonomy failed or no results
+                            logger.warning(f"Skipping viz context update for sequence {seq_id} due to empty results.")
+
                             
                         # Real-time UI Update hack (rerun not ideal in loop, so we rely on session state being read next pass or manual container update if possible)
                         # Streamlit loops block the UI, so we need a container to update dynamically.
