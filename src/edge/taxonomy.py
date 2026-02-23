@@ -2,6 +2,7 @@ import os
 import subprocess
 import logging
 import pandas as pd
+import numpy as np
 from pathlib import Path
 from typing import List, Dict, Any, Union, Tuple
 from collections import Counter
