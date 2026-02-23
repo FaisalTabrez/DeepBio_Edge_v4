@@ -82,16 +82,36 @@ class DiscoveryEngine:
             return []
 
         # 1. Filter for 'Dark Taxa' (Is Novel == True)
-        # Check for valid vector data
-        dark_taxa = [item for item in session_buffer if item.get('is_novel', False) and item.get('vector') is not None]
+        # Check for valid vector data. Use direct None check to avoid numpy ambiguity if 'vector' is array
+        dark_taxa = []
+        for item in session_buffer:
+             is_novel = item.get('is_novel', False)
+             vec = item.get('vector')
+             if is_novel and vec is not None:
+                 dark_taxa.append(item)
         
         if len(dark_taxa) < self.min_cluster_size:
             logger.info("Insufficient Dark Taxa for clustering.")
             return []
             
         # 2. Prepare Tensor
-        # session_buffer vectors might be lists; convert to numpy
-        vectors = np.array([np.array(item['vector']) for item in dark_taxa])
+        # vectors = np.array([np.array(item['vector']) for item in dark_taxa])
+        # Force conversion to list first to avoid ambiguous truth value check on numpy array inside list comp or constructor
+        vec_list = []
+        for item in dark_taxa:
+            v = item.get('vector')
+            if v is not None:
+                # Ensure it is a flat list/array for clustering
+                if isinstance(v, np.ndarray):
+                    v = v.flatten()
+                elif isinstance(v, list):
+                    v = np.array(v).flatten()
+                vec_list.append(v)
+        
+        if not vec_list:
+             return []
+
+        vectors = np.array(vec_list)
         
         # 3. Fit Clusters
         try:
