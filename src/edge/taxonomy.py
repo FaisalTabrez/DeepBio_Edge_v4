@@ -119,7 +119,7 @@ class TaxonomyEngine:
 
         # Normal voting on Full Name first
         # Defensive check for matches if passed as non-list-of-dicts (rare pandas behavior)
-        if hasattr(matches, "to_dict"):
+        if isinstance(matches, pd.DataFrame):
              matches = matches.to_dict('records')
 
         names = []
@@ -267,7 +267,8 @@ class TaxonomyEngine:
         Returns a rich 'Identity Card' dictionary.
         """
         # Defensive: Handle DataFrame passed as list
-        if hasattr(matches, "empty"): # Is likely a DataFrame
+        # We check isinstance first to avoid attribute access errors on standard lists
+        if isinstance(matches, pd.DataFrame): 
              if matches.empty:
                  return {"display_name": "No Data", "status": "Error", "is_novel": False, "confidence": 0}
              matches = matches.to_dict('records')
@@ -401,7 +402,7 @@ class TaxonomyEngine:
         Main Pipeline: Converts raw Vector DB hits into Rich Discovery Cards.
         """
         # Handle DataFrame input defensively
-        if hasattr(raw_hits, "to_dict"):
+        if isinstance(raw_hits, pd.DataFrame):
              if raw_hits.empty: return []
              raw_hits = raw_hits.to_dict('records')
 
