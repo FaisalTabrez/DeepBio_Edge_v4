@@ -134,7 +134,7 @@ class TaxonomyEngine:
              else:
                  names.append(str(val))
                  
-        top_k = names[:5] # Look at top 5 now
+        top_k = names[:50] # Look at top 50 now for 100k scale
         if not top_k:
              return "Unknown", 0.0
              
@@ -142,10 +142,10 @@ class TaxonomyEngine:
         counts = Counter(top_k)
         most_common_sp, count_sp = counts.most_common(1)[0]
         
-        # If > 3 votes (out of 5) for exact species -> Strong Match
+        # If > 35 votes (out of 50) for exact species -> Strong Match
         # Defensive integer typing for counts
         count_sp_int = int(count_sp)
-        if count_sp_int >= 3:
+        if count_sp_int >= 35:
             return most_common_sp, count_sp_int / len(top_k)
 
         # 2. Genus Level Consensus (Fallback)
@@ -164,10 +164,10 @@ class TaxonomyEngine:
         if len(c_gen) > 0:
             most_common_gen, count_gen = c_gen.most_common(1)[0]
             count_gen_int = int(count_gen)
-            # 4/5 Policy
-            if count_gen_int >= 4:
+            # 70% Policy (35/50)
+            if count_gen_int >= 35:
                 return f"{most_common_gen} sp. (Genus Candidate)", 0.90 # High confidence in Genus
-            elif count_gen_int >= 3:
+            elif count_gen_int >= 25:
                 return f"{most_common_gen} sp. (Genus Match)", 0.75
             
         # Fallback to Top Hit if very strong
@@ -233,7 +233,7 @@ class TaxonomyEngine:
             all_names = [str(n) for n in all_names_raw if isinstance(n, (str, float, int))]
             
             # Extract one best match with score
-            # limit score > 90 to be safe
+            # limit score > 85 to be safe (Oracle acts as Validator for 100k DB)
             fuzzy_res = process.extractOne(scientific_name, all_names)
             
             # Defensive check on fuzzy_res structure
@@ -243,7 +243,7 @@ class TaxonomyEngine:
                 if isinstance(score, (np.ndarray, list)):
                      score = float(score[0]) if len(score) > 0 else 0.0
                 
-                if score > 90: # Score > 90/100
+                if score > 85: # Score > 85/100 for 100k scale
                     best_match_name = fuzzy_res[0]
                     # logger.info(f"Fuzzy Corrected: {scientific_name} -> {best_match_name} ({score})")
                     hit = self.worms_cache[self.worms_cache['ScientificName'] == best_match_name]
@@ -392,6 +392,7 @@ class TaxonomyEngine:
             "confidence": float(top_sim),
             "confidence_pct": float(top_sim * 100),
             "consensus_score": float(consensus_conf),
+            "consensus_name": str(consensus_name),
             "lineage": lineage_str,
             "source_method": source,
             "vector": vector_data
@@ -437,6 +438,7 @@ class TaxonomyEngine:
              conf_pct = float(conf_pct_raw)
              
         identity['confidence_pct'] = f"{conf_pct:.1f}%"
+        identity['consensus_name'] = identity.get('consensus_name', 'Unknown')
         # Extract Phylum for visualizer coloring
         identity['phylum'] = identity['lineage'].split(';')[0] if identity['lineage'] else "Unknown"
         

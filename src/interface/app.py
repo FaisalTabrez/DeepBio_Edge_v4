@@ -483,9 +483,9 @@ with tab_monitor:
                         # log_event(f"DEBUG: Search returned {len(results_viz)} results")
                         
                         # 3. Resolve (@Bio-Taxon Triple-Tier Logic)
-                        # We extract the Top 5 candidates for Consensus & Oracle verification
+                        # We extract the Top 50 candidates for Consensus & Oracle verification
                         # Explicitly slice list to avoid ambiguity
-                        top_candidates = results_viz[:5] if isinstance(results_viz, list) else []
+                        top_candidates = results_viz[:50] if isinstance(results_viz, list) else []
                         
                         # Add extra safety check on candidates
                         # If somehow query_vector returns weird stuff
@@ -608,6 +608,9 @@ with tab_monitor:
                         </div>
                         <div style="margin-top: 8px; font-size: 0.85em; color: #CBD5E1;">
                             TYPE: <b>{status_prefix}</b> | STATUS: {hit['status'].upper()}
+                        </div>
+                        <div style="margin-top: 4px; font-size: 0.75em; color: #94A3B8; font-style: italic;">
+                            Analyzed 50 neighbors in latent space. Consensus: {hit.get('consensus_name', 'Unknown').split(' ')[0]}
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
