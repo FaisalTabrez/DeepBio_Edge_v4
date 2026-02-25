@@ -6,10 +6,10 @@ from Bio import Entrez, SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
-# Add root to path so we can import config_init
+# Add root to path so we can import config
 sys.path.append(os.getcwd())
 
-from src.edge.config_init import RAW_PATH
+from configs.config import RAW_PATH
 
 # ==========================================
 # @Data-Ops & @Bio-Taxon: Real Data Acquisition

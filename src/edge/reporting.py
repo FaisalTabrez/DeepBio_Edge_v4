@@ -4,7 +4,7 @@ import math
 from datetime import datetime
 from collections import Counter
 from typing import List, Dict, Any
-from src.edge.config_init import RESULTS_PATH
+from configs.config import RESULTS_PATH
 from src.edge.logger import get_logger
 
 logger = get_logger()

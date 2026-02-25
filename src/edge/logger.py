@@ -1,6 +1,6 @@
 import logging
 import os
-from src.edge.config_init import LOGS_PATH
+from configs.config import LOG_FILE
 
 # Define a global logger name
 LOGGER_NAME = "DeepBio-Logger"
@@ -12,7 +12,6 @@ def setup_localized_logging():
     - Writes to standard terminal (Developer View).
     - Writes to 'session.log' (UI View).
     """
-    log_file = LOGS_PATH / 'session.log'
     
     # Create the logger
     logger = logging.getLogger()
@@ -24,7 +23,7 @@ def setup_localized_logging():
         
     # 1. File Handler (The UI Bridge)
     # mode='w' clears the file implicitly on startup
-    file_handler = logging.FileHandler(str(log_file), mode='w', encoding='utf-8')
+    file_handler = logging.FileHandler(str(LOG_FILE), mode='w', encoding='utf-8')
     file_handler.setLevel(logging.INFO)
     
     # 2. Console Handler (The Developer Terminal)
@@ -44,7 +43,7 @@ def setup_localized_logging():
     logger.addHandler(console_handler)
     
     logging.info("--- DEEPBIO-SCAN SESSION INITIALIZED ---")
-    logging.info(f"Logging Bridge established at: {log_file}")
+    logging.info(f"Logging Bridge established at: {LOG_FILE}")
 
 def get_logger():
     return logging.getLogger(LOGGER_NAME)

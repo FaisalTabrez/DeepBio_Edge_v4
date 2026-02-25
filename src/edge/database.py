@@ -6,7 +6,7 @@ import numpy as np
 import pyarrow as pa
 import time
 from typing import Optional
-from src.edge.config_init import DB_PATH
+from configs.config import DB_PATH, ATLAS_TABLE
 
 # ==========================================
 # @Data-Ops: Database & File System Logic
@@ -19,7 +19,7 @@ class AtlasManager:
     Manages the LanceDB connection on the NTFS-formatted USB drive.
     Optimized for Disk-Native Search (IVF-PQ) and Windows File Locking limits.
     """
-    def __init__(self, db_path: Optional[str] = None, table_name: str = "reference_atlas"):
+    def __init__(self, db_path: Optional[str] = None, table_name: str = ATLAS_TABLE):
         self.db_path = str(db_path) if db_path else str(DB_PATH)
         self.table_name = table_name
         self.db = None
@@ -42,6 +42,7 @@ class AtlasManager:
             if self.table_name in self.db.table_names():
                 self.table = self.db.open_table(self.table_name)
                 logger.info(f"Connected to existing atlas: '{self.table_name}'")
+                print(f"[DATABASE] Successfully connected to 100k Atlas on {self.db_path}")
             else:
                 logger.warning(f"Table '{self.table_name}' not found. Use ingest_atlas() to seed data.")
 

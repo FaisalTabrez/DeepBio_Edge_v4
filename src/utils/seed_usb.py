@@ -15,15 +15,14 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(project_root))
 
-from src.edge.config_init import DB_PATH, RAW_PATH, LOGS_PATH, initialize_folders
+from configs.config import DB_PATH, RAW_PATH, LOG_FILE, initialize_folders
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(name)s] - %(levelname)s - %(message)s")
 logger = logging.getLogger("@Data-Ops")
 
 # File Handler (Bridge to UI)
-log_file = LOGS_PATH / 'session.log'
-file_handler = logging.FileHandler(log_file)
+file_handler = logging.FileHandler(LOG_FILE)
 file_handler.setLevel(logging.INFO)
 file_formatter = logging.Formatter('%(message)s')
 file_handler.setFormatter(file_formatter)

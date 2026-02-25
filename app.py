@@ -14,10 +14,10 @@ from pathlib import Path
 # Create a module path fix for locating src modules if run from root
 sys.path.append(os.getcwd())
 
-from src.edge.config_init import initialize_folders, TAXONOMY_DB_PATH
+from configs.config import initialize_folders, TAXON_DIR
 
 # Set TaxonKit DB Path (Windows Compatible)
-os.environ["TAXONKIT_DB"] = str(TAXONOMY_DB_PATH)
+os.environ["TAXONKIT_DB"] = str(TAXON_DIR)
 
 # Initialize Directory Structure on Pendrive (or local)
 initialize_folders()
@@ -313,12 +313,21 @@ st.markdown(f"""
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 total_seqs = atlas.table.count_rows() if atlas.table else 0
 index_size = "482 MB" # Mock
-novelty_rate = "12.4%" # Mock
+
+# Calculate Novelty Rate based on clusters
+if 'novel_clusters' in st.session_state and st.session_state.novel_clusters:
+    num_clusters = len(st.session_state.novel_clusters)
+    novelty_rate = f"{num_clusters} NTUs"
+    novelty_delta = f"from {len(st.session_state.scan_results_buffer)} seqs"
+else:
+    novelty_rate = "0 NTUs"
+    novelty_delta = "0%"
+
 latency = "< 8ms" # Updated for 100k IVF-PQ index
 
 kpi1.metric("REFERENCE ATLAS", f"{total_seqs:,} SIGNATURES", "100k LOADED")
 kpi2.metric("INDEX SIZE", index_size, "+2 MB")
-kpi3.metric("NOVELTY RATE", novelty_rate, "-0.2%")
+kpi3.metric("NOVELTY RATE", novelty_rate, novelty_delta)
 kpi4.metric("MEDIAN LATENCY", latency, "OPTIMAL")
 
 st.markdown("---")
@@ -334,7 +343,7 @@ tab_monitor, tab_visualizer, tab_discovery, tab_report, tab_docs = st.tabs([
     "DOCUMENTATION"
 ])
 
-from src.edge.config_init import LOGS_PATH
+from configs.config import LOG_FILE
 
 # One-time Setup
 if 'logger_setup' not in st.session_state:
@@ -351,12 +360,11 @@ def display_terminal_logs():
     """
     Reads the physical log file on the E: Drive (or local) and displays it.
     """
-    log_file = LOGS_PATH / 'session.log'
-    if not log_file.exists():
+    if not LOG_FILE.exists():
         return "INFO: Waiting for system logs..."
         
     try:
-        with open(log_file, 'r', encoding='utf-8') as f:
+        with open(LOG_FILE, 'r', encoding='utf-8') as f:
             lines = f.readlines()
             # Get last 20 lines
             last_lines = lines[-20:] if len(lines) > 20 else lines
@@ -523,6 +531,7 @@ with tab_monitor:
                         if formatted_results and isinstance(formatted_results, list) and len(formatted_results) > 0:
                             top_hit = formatted_results[0]
                             top_hit['query_id'] = seq_id # Track query ID
+                            top_hit['raw_sequence'] = raw_seq # Store raw sequence for FASTA export
                             st.session_state.scan_results_buffer.insert(0, top_hit)
                             
                             # Ensure vector is stored flat for viz
@@ -547,8 +556,9 @@ with tab_monitor:
                         # For 'Real-Time' feel, we will update a placeholder.
                         
                         # Limit buffer size
-                        if len(st.session_state.scan_results_buffer) > 50:
-                            st.session_state.scan_results_buffer.pop()
+                        # We need to keep all sequences for clustering, so we shouldn't pop them during the stream
+                        # if len(st.session_state.scan_results_buffer) > 50:
+                        #     st.session_state.scan_results_buffer.pop()
                             
                     log_event(f"SUCCESS: Stream Complete. Processed {count} sequences.")
                     progress_bar.progress(100)
@@ -562,6 +572,16 @@ with tab_monitor:
                              st.session_state.novel_clusters = clusters
                              if clusters:
                                  log_event(f"SUCCESS: DISCOVERY: {len(clusters)} novel clusters identified.")
+                                 
+                                 # Tag the buffer items with their cluster entity for the UI
+                                 for cluster in clusters:
+                                     cid = cluster['otu_id']
+                                     for member in cluster.get('members', []):
+                                         mid = member['id']
+                                         for hit in st.session_state.scan_results_buffer:
+                                             if hit.get('query_id') == mid:
+                                                 hit['cluster_id'] = cid
+                                                 hit['cluster_entity'] = cluster
                          except Exception as de:
                              logger.error(f"Discovery Failed: {de}")
 
@@ -586,8 +606,53 @@ with tab_monitor:
             
             if st.session_state.scan_results_buffer and len(st.session_state.scan_results_buffer) > 0:
                 with results_container:
+                    rendered_clusters = set()
                     for hit in st.session_state.scan_results_buffer:
-                        # Determine Styling
+                        cluster_id = hit.get('cluster_id')
+                        
+                        if cluster_id:
+                            if cluster_id in rendered_clusters:
+                                continue # Skip individual cards for clustered items
+                            
+                            rendered_clusters.add(cluster_id)
+                            entity = hit.get('cluster_entity', {})
+                            
+                            # Render NTU Discovery Card
+                            div_val = entity.get('biological_divergence', 0.0)
+                            gauge_color = "#00FF00" if div_val < 0.1 else ("#00E5FF" if div_val < 0.25 else "#FF007A")
+                            confidence = 100 - (div_val * 100)
+                            
+                            consensus_text = f"AI confirms relationship to {entity.get('consensus_name', 'Unknown')} but suggests {entity.get('consensus_rank', 'Unknown')} status."
+                            if "Modiolidae" in entity.get('consensus_name', ''):
+                                consensus_text = f"AI recognizes these as deep-sea mussels, but the {confidence:.1f}% confidence suggests a novel generic lineage distinct from Bathymodiolus."
+                                
+                            st.markdown(f"""
+                            <div class="glass-panel discovery-card-novel" style="padding: 15px; margin-bottom: 15px; border: 2px solid #FF007A; box-shadow: 0 0 15px rgba(255, 0, 122, 0.5);">
+                                <div style="display: flex; justify-content: space-between; align-items: start;">
+                                    <div>
+                                        <span style="font-size: 0.8em; color: #94A3B8;">NTU DISCOVERY</span>
+                                        <h3 class="neon-text-pink" style="margin: 5px 0; color: #FF007A; text-shadow: 0 0 5px #FF007A;">✦ [{entity.get('otu_id', 'UNKNOWN')}] NOVEL GENUS DETECTED</h3>
+                                        <div class="breadcrumb">Phylogenetic Anchor: {entity.get('consensus_name', 'Unknown')} (Consensus from 50 neighbors)</div>
+                                    </div>
+                                    <div style="text-align: right;">
+                                        <div style="font-size: 1.5em; font-weight: bold; color: #FF007A;">{confidence:.1f}%</div>
+                                        <div style="font-size: 0.7em; color: #64748B;">MEAN CONFIDENCE</div>
+                                    </div>
+                                </div>
+                                <div style="margin-top: 10px; background: #0F172A; height: 6px; border-radius: 3px; overflow: hidden;">
+                                    <div style="width: {confidence}%; background: #FF007A; height: 100%; box-shadow: 0 0 10px #FF007A;"></div>
+                                </div>
+                                <div style="margin-top: 8px; font-size: 0.85em; color: #CBD5E1;">
+                                    POPULATION: <b>{entity.get('cluster_size', 0)} sequences</b> forming a stable genomic cluster
+                                </div>
+                                <div style="margin-top: 4px; font-size: 0.75em; color: #94A3B8; font-style: italic;">
+                                    {consensus_text}
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            continue
+                            
+                        # Determine Styling (Normal Card)
                         raw_novel = hit.get('is_novel', False)
                         is_novel = False
                         if isinstance(raw_novel, np.ndarray):
@@ -741,7 +806,7 @@ with tab_visualizer:
 # --- TAB 3: NOVELTY DISCOVERY ---
 with tab_discovery:
     st.markdown('<div class="glass-panel">', unsafe_allow_html=True)
-    st.subheader("UNSUPERVISED BIOLOGICAL DISCOVERY ENGINE")
+    st.subheader("RESEARCH GALLERY: NTU DISCOVERY")
     st.caption("Auto-Clustering 'Dark Taxa' to identify potential new species groups.")
     
     if 'scan_results_buffer' in st.session_state and st.session_state.scan_results_buffer:
@@ -751,87 +816,114 @@ with tab_discovery:
         if novel_entities:
             st.success(f"DISCOVERY ALERT: Identified {len(novel_entities)} Potential New Species Groups!")
             
-            # Layout: 3D Map on the left, Cluster Cards on the right
-            col_map, col_cards = st.columns([2, 1])
-            
-            selected_cluster_id = None
-            
-            with col_map:
-                if 'viz_context' in st.session_state and st.session_state.viz_context:
-                    ctx = st.session_state.viz_context
-                    fig_3d = viz.create_plot(
-                        reference_hits=ctx['ref_hits'],
-                        query_vector=ctx['query_vec'],
-                        query_display_name=ctx['display_name'],
-                        is_novel=ctx['is_novel'],
-                        atlas_manager=atlas,
-                        novel_clusters=novel_entities
-                    )
-                    
-                    # Enable selection
-                    event = st.plotly_chart(
-                        fig_3d, 
-                        use_container_width=True, 
-                        on_select="rerun",
-                        selection_mode="points"
-                    )
-                    
-                    selected_points = event.selection.get("points", []) if hasattr(event, "selection") and isinstance(event.selection, dict) else (event["selection"]["points"] if isinstance(event, dict) and "selection" in event else [])
-                    if selected_points:
-                        for pt in selected_points:
-                            if "customdata" in pt and pt["customdata"]:
-                                selected_cluster_id = pt["customdata"][0]
-                                break
-                else:
-                    st.info("No manifold context available.")
-            
-            with col_cards:
-                # Export Buffer
-                export_data = []
+            # 3D Map at the top
+            if 'viz_context' in st.session_state and st.session_state.viz_context:
+                ctx = st.session_state.viz_context
+                fig_3d = viz.create_plot(
+                    reference_hits=ctx['ref_hits'],
+                    query_vector=ctx['query_vec'],
+                    query_display_name=ctx['display_name'],
+                    is_novel=ctx['is_novel'],
+                    atlas_manager=atlas,
+                    novel_clusters=novel_entities
+                )
                 
-                # 2. Render Cluster Gallery
-                for i, entity in enumerate(novel_entities):
-                    # Dynamic Color based on divergence
-                    div_val = entity['biological_divergence']
-                    gauge_color = "#00FF00" if div_val < 0.1 else ("#00E5FF" if div_val < 0.25 else "#FF007A")
+                # Enable selection
+                event = st.plotly_chart(
+                    fig_3d, 
+                    use_container_width=True, 
+                    on_select="rerun",
+                    selection_mode="points"
+                )
+                
+                selected_cluster_id = None
+                selected_points = event.selection.get("points", []) if hasattr(event, "selection") and isinstance(event.selection, dict) else (event["selection"]["points"] if isinstance(event, dict) and "selection" in event else [])
+                if selected_points:
+                    for pt in selected_points:
+                        if "customdata" in pt and pt["customdata"]:
+                            selected_cluster_id = pt["customdata"][0]
+                            break
+            else:
+                st.info("No manifold context available.")
+                selected_cluster_id = None
+            
+            st.markdown("### THE NTU GALLERY")
+            
+            # Export Buffer
+            export_data = []
+            
+            # 2. Render Cluster Gallery (Grid)
+            cols = st.columns(3)
+            for i, entity in enumerate(novel_entities):
+                with cols[i % 3]:
+                    # Bioluminescent Neon Pink as requested
+                    gauge_color = "#FF007A"
                     
                     # Highlight logic
                     is_highlighted = (selected_cluster_id == entity['otu_id'])
                     
-                    bg_color = "rgba(0, 229, 255, 0.2)" if is_highlighted else "rgba(0,0,0,0.3)"
+                    bg_color = "rgba(255, 0, 122, 0.1)" if is_highlighted else "rgba(0,0,0,0.3)"
                     border_style = f"2px solid {gauge_color}" if is_highlighted else f"1px solid {gauge_color}"
+                    box_shadow = f"0 0 15px {gauge_color}" if is_highlighted else f"0 0 5px {gauge_color}"
                     
-                    confidence = 100 - (div_val * 100)
-                    divergence_label = "Highly Divergent" if div_val > 0.25 else "Moderately Divergent"
+                    confidence = 100 - (entity['biological_divergence'] * 100)
                     
-                    consensus_text = f"AI confirms relationship to {entity['consensus_name']} but suggests {entity['consensus_rank']} status."
-                    if "Modiolidae" in entity['consensus_name']:
-                        consensus_text = "AI confirms relationship to deep-sea mussels (Bathymodiolus complex) but suggests novel generic status."
+                    # Consensus Breadcrumb Logic
+                    lineage_parts = entity.get('lineage', '').split(';')
+                    lineage_parts = [p for p in lineage_parts if p and p != 'Unknown']
+                    if len(lineage_parts) > 3:
+                        breadcrumb = " > ".join(lineage_parts[:3]) + f" > <span style='color: {gauge_color}; font-weight: bold;'>[NOVEL GENUS]</span>"
+                    elif len(lineage_parts) > 0:
+                        breadcrumb = " > ".join(lineage_parts) + f" > <span style='color: {gauge_color}; font-weight: bold;'>[NOVEL GENUS]</span>"
+                    else:
+                        breadcrumb = f"Unknown > <span style='color: {gauge_color}; font-weight: bold;'>[NOVEL GENUS]</span>"
+                    
+                    # Centroid Coordinates
+                    coords = entity['avg_vector'][:3] if 'avg_vector' in entity and len(entity['avg_vector']) >= 3 else [0,0,0]
+                    coords_str = f"[{coords[0]:.3f}, {coords[1]:.3f}, {coords[2]:.3f}, ...]"
                     
                     st.markdown(f"""
-                    <div style="border: {border_style}; padding: 15px; border-radius: 8px; background: {bg_color}; margin-bottom: 20px; transition: all 0.3s ease;">
-                        <h4 style="color: {gauge_color}; margin: 0; font-size: 1.1em;">✦ {entity['otu_id']} <br><span style="font-size: 0.7em; color: #94A3B8;">[Phylogenetic Anchor: {entity['consensus_name']}]</span></h4>
+                    <div style="border: {border_style}; box-shadow: {box_shadow}; padding: 15px; border-radius: 8px; background: {bg_color}; margin-bottom: 15px; transition: all 0.3s ease; height: 100%;">
+                        <h4 style="color: {gauge_color}; margin: 0; font-size: 1.1em; text-shadow: 0 0 5px {gauge_color};">✦ {entity['otu_id']}</h4>
                         
-                        <div style="margin-top: 10px; margin-bottom: 5px; font-size: 0.9em;">
+                        <div style="margin-top: 10px; margin-bottom: 5px; font-size: 0.85em; color: #CBD5E1;">
+                            <b>Holotype ID:</b> {entity.get('representative_id', 'Unknown')}
+                        </div>
+                        <div style="margin-bottom: 5px; font-size: 0.85em; color: #CBD5E1;">
+                            <b>Latent Coords:</b> <span style="font-family: monospace;">{coords_str}</span>
+                        </div>
+                        <div style="margin-bottom: 5px; font-size: 0.85em; color: #CBD5E1;">
                             <b>Population:</b> {entity['cluster_size']} sequences
                         </div>
-                        <div style="margin-bottom: 5px; font-size: 0.9em;">
-                            <b>Mean Confidence:</b> {confidence:.1f}% ({divergence_label})
-                        </div>
                         
-                        <div style="margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.05); border-left: 3px solid {gauge_color}; font-size: 0.85em; font-style: italic; color: #CBD5E1;">
-                            <b>Consensus:</b> {consensus_text}
+                        <div style="margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.05); border-left: 3px solid {gauge_color}; font-size: 0.8em; color: #E2E8F0;">
+                            <b>Consensus Breadcrumb:</b><br>
+                            {breadcrumb}
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
                     
                     # Prepare for Export
-                    export_data.append(f">{entity['otu_id']} | Divergence: {entity['divergence_pct']} | Anchor: {entity['nearest_relative']}\n[SEQUENCE_DATA_PLACEHOLDER_FOR_LAB]")
+                    fasta_lines = []
+                    for member in entity.get('members', []):
+                        fasta_lines.append(f">{member['id']} | Cluster: {entity['otu_id']} | Anchor: {entity['nearest_relative']}")
+                        fasta_lines.append(member['seq'])
+                    cluster_fasta = "\n".join(fasta_lines)
+                    export_data.append(cluster_fasta)
+                    
+                    # Download Button per cluster
+                    st.download_button(
+                        label="Download Cluster FASTA",
+                        data=cluster_fasta,
+                        file_name=f"{entity['otu_id']}.fasta",
+                        mime="text/plain",
+                        key=f"dl_{entity['otu_id']}"
+                    )
 
             st.divider()
             
-            # 3. Export Action
-            if st.button("EXPORT CLUSTERS (Phylogenetic Tree)", icon=":material/download:"):
+            # 3. Export Action (Global)
+            if st.button("EXPORT ALL CLUSTERS (Phylogenetic Tree)", icon=":material/download:"):
                 export_path = Path("E:/DeepBio_Scan/results/novel_clusters.fasta")
                 # Fallback to local if E: missing
                 if not Path("E:/").exists():

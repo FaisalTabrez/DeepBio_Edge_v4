@@ -4,7 +4,7 @@ import logging
 import time
 from pathlib import Path
 from typing import List, Dict, Set, Optional
-from src.edge.config_init import TAXONOMY_DB_PATH
+from configs.config import TAXON_DIR
 
 # ==========================================
 # @Data-Ops: Tier 2 Marine Oracle Seeder (Expanded)

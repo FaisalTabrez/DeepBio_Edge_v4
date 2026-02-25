@@ -37,7 +37,8 @@ class DiscoveryEngine:
     """
     def __init__(self, atlas: AtlasManager):
         self.atlas = atlas
-        self.min_cluster_size = 2 # Optimized for small batch "Edge" discovery
+        self.min_cluster_size = 3 # Optimized for small batch "Edge" discovery
+        self.min_samples = 2
         self.metric = 'euclidean'
         
         if not HAS_HDBSCAN and (DBSCAN is None):
@@ -45,11 +46,11 @@ class DiscoveryEngine:
             self.mode = "DISABLED"
         elif HAS_HDBSCAN:
             self.mode = "HDBSCAN"
-            self.clusterer = hdbscan.HDBSCAN(min_cluster_size=self.min_cluster_size, metric=self.metric)
+            self.clusterer = hdbscan.HDBSCAN(min_cluster_size=self.min_cluster_size, min_samples=self.min_samples, metric=self.metric)
         elif DBSCAN is not None:
             self.mode = "DBSCAN"
             # eps=0.3 is a heuristic for normalized vector space (cosine-ish)
-            self.clusterer = DBSCAN(eps=0.3, min_samples=self.min_cluster_size, metric=self.metric)
+            self.clusterer = DBSCAN(eps=0.3, min_samples=self.min_samples, metric=self.metric)
         else:
             self.mode = "DISABLED"
             logger.warning("Falback logic failed. Discovery disabled.")
@@ -234,6 +235,7 @@ class DiscoveryEngine:
             entity = {
                 "otu_id": otu_id,
                 "cluster_size": len(indices),
+                "representative_id": representative_seq.get('query_id', 'Unknown'),
                 "representative_name": representative_seq['display_name'], # e.g. "Cryptic Bathymodiolus sp."
                 "nearest_relative": nearest_relative,
                 "biological_divergence": avg_member_distance,
@@ -242,8 +244,17 @@ class DiscoveryEngine:
                 "status": status,
                 "classification": classification,
                 "consensus_rank": consensus_rank,
-                "consensus_name": consensus_name
+                "consensus_name": consensus_name,
+                "lineage": representative_seq.get('lineage', 'Unknown'),
+                "members": [{"id": m.get('query_id', 'Unknown'), "seq": m.get('raw_sequence', 'NNNN')} for m in cluster_members],
+                "member_vectors": cluster_vectors
             }
+            
+            # Tag the original buffer items with their new cluster ID
+            for member in cluster_members:
+                member['cluster_id'] = otu_id
+                member['cluster_entity'] = entity
+                
             discovered_entities.append(entity)
             
         return discovered_entities

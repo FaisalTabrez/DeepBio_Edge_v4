@@ -37,22 +37,51 @@ class ManifoldVisualizer:
 
     def load_background_cloud(self, atlas_manager):
         """
-        Fetches a random sample of 1000 vectors from the real LanceDB table
+        Fetches a random sample of 5000 vectors from the real LanceDB table
         to serve as the 'Universe' background for the PCA plot.
         """
         if self.background_cloud_df is not None:
              return # Already loaded
              
         try:
-             if atlas_manager and atlas_manager.table:
-                 logger.info("Loading Background Atlas Cloud from LanceDB...")
-                 df = atlas_manager.table.head(2000).to_pandas()
-                 
-                 if len(df) > 1000:
-                     df = df.sample(n=1000, random_state=42)
+             if atlas_manager and atlas_manager.db:
+                 # Explicitly query the reference_atlas_v100k table
+                 table_name = "reference_atlas_v100k"
+                 try:
+                     table = atlas_manager.db.open_table(table_name)
+                 except Exception:
+                     table = atlas_manager.table # Fallback
                      
-                 self.background_cloud_df = df
-                 logger.info(f"Background Cloud Loaded: {len(df)} points")
+                 if table:
+                     logger.info(f"Loading Background Atlas Cloud from {table.name}...")
+                     # Load full table to pandas for stratified sampling
+                     df = table.to_pandas()
+                     
+                     total_points = len(df)
+                     sample_size = min(5000, total_points)
+                     
+                     if total_points > 0:
+                         # Stratified sample of 5000 rows
+                         stratify_col = None
+                         for col in ['Phylum', 'Class', 'Order', 'Family', 'lineage']:
+                             if col in df.columns:
+                                 stratify_col = col
+                                 break
+                         
+                         if stratify_col:
+                             # Group by the stratify column and sample proportionally
+                             df = df.groupby(stratify_col, group_keys=False).apply(
+                                 lambda x: x.sample(n=max(1, int(len(x) * sample_size / total_points)), random_state=42)
+                             )
+                             # Ensure exactly 5000 if we overshot
+                             if len(df) > sample_size:
+                                 df = df.sample(n=sample_size, random_state=42)
+                         else:
+                             df = df.sample(n=sample_size, random_state=42)
+                         
+                     self.background_cloud_df = df
+                     print(f"[VISUALIZER] High-Density Atlas Loaded: {sample_size}/{total_points} points sampled.")
+                     logger.info(f"Background Cloud Loaded: {sample_size} points")
         except Exception as e:
              logger.warning(f"Failed to load background cloud: {e}")
 
@@ -60,7 +89,8 @@ class ManifoldVisualizer:
                             ref_vectors: np.ndarray, 
                             query_vector: np.ndarray,
                             background_vectors: Optional[np.ndarray] = None,
-                            cluster_vectors: Optional[np.ndarray] = None) -> pd.DataFrame:
+                            cluster_vectors: Optional[np.ndarray] = None,
+                            cluster_member_vectors: Optional[np.ndarray] = None) -> pd.DataFrame:
         """
         Reduces Dimensions from N -> 3 using PCA.
         Fits on Background Cloud + Hits to establish the 'Manifold'.
@@ -71,11 +101,9 @@ class ManifoldVisualizer:
             
             # Prepare Training Set for PCA Fit
             # Includes Background + References to define axes
+            # @Embedder-ML: Use the 100k atlas (background) as the baseline 'Global Biodiversity Coordinate System'
             if background_vectors is not None and len(background_vectors) > 10:
-                if len(ref_vectors) > 0:
-                    fit_data = np.vstack([background_vectors, ref_vectors])
-                else:
-                    fit_data = background_vectors
+                fit_data = background_vectors
             elif len(ref_vectors) > 0:
                 fit_data = ref_vectors
             else:
@@ -113,7 +141,13 @@ class ManifoldVisualizer:
                  df_clusters = pd.DataFrame(pca_clus, columns=['x', 'y', 'z'])
                  df_clusters['type'] = 'cluster_point'
 
-            return pd.concat([df_bg, df_ref, df_query, df_clusters], ignore_index=True)
+            df_cluster_members = pd.DataFrame()
+            if cluster_member_vectors is not None and len(cluster_member_vectors) > 0:
+                 pca_clus_mem = pca.transform(cluster_member_vectors)
+                 df_cluster_members = pd.DataFrame(pca_clus_mem, columns=['x', 'y', 'z'])
+                 df_cluster_members['type'] = 'cluster_member'
+
+            return pd.concat([df_bg, df_ref, df_query, df_clusters, df_cluster_members], ignore_index=True)
             
         except Exception as e:
             logger.error(f"PCA Reduction Failed: {e}")
@@ -168,16 +202,31 @@ class ManifoldVisualizer:
         # 4. Extract Cluster Vectors
         cluster_vectors = None
         cluster_map = {} 
+        cluster_member_vectors = None
+        cluster_member_map = {}
+        
         if novel_clusters:
             temp_vecs = []
+            temp_member_vecs = []
             for i, cluster in enumerate(novel_clusters):
+                cid = cluster.get('otu_id', 'Unknown')
                 if 'avg_vector' in cluster:
                     v = cluster['avg_vector']
                     if isinstance(v, list): v = np.array(v)
                     temp_vecs.append(v)
-                    cluster_map[i] = cluster.get('otu_id', 'Unknown')
+                    cluster_map[len(temp_vecs)-1] = cid
+                
+                if 'member_vectors' in cluster:
+                    m_vecs = cluster['member_vectors']
+                    for mv in m_vecs:
+                        if isinstance(mv, list): mv = np.array(mv)
+                        temp_member_vecs.append(mv)
+                        cluster_member_map[len(temp_member_vecs)-1] = cid
+                        
             if temp_vecs:
                 cluster_vectors = np.vstack(temp_vecs)
+            if temp_member_vecs:
+                cluster_member_vectors = np.vstack(temp_member_vecs)
 
         # 5. Run PCA - Dimension Reduction
         # Ensure query is numpy
@@ -188,7 +237,8 @@ class ManifoldVisualizer:
             ref_vectors=ref_vecs_np,
             query_vector=query_vector,
             background_vectors=bg_vecs_np,
-            cluster_vectors=cluster_vectors
+            cluster_vectors=cluster_vectors,
+            cluster_member_vectors=cluster_member_vectors
         )
         
         if combined_coords.empty:
@@ -201,6 +251,9 @@ class ManifoldVisualizer:
         cluster_coords = pd.DataFrame()
         if 'cluster_point' in combined_coords['type'].values:
              cluster_coords = combined_coords[combined_coords['type'] == 'cluster_point'].reset_index(drop=True)
+        cluster_member_coords = pd.DataFrame()
+        if 'cluster_member' in combined_coords['type'].values:
+             cluster_member_coords = combined_coords[combined_coords['type'] == 'cluster_member'].reset_index(drop=True)
 
         # --- PLOTLY CONSTRUCTION ---
         fig = go.Figure()
@@ -258,15 +311,18 @@ class ManifoldVisualizer:
                         i=simplices[:,0], j=simplices[:,1], k=simplices[:,2],
                         color='#00E5FF', opacity=0.1,
                         name='Phylogenetic Envelope',
+                        showlegend=False,
                         hoverinfo='skip'
                     ))
                 except Exception as e:
                     pass
 
-        # C. Novel Cluster Centers - Neon Pink #FF007A
+        # C. Novel Clusters (NTUs) - Neon Pink #FF007A
         if not cluster_coords.empty:
             for i, row in cluster_coords.iterrows():
                 cid = cluster_map.get(i, f"Group {i}")
+                
+                # Plot Centroid
                 fig.add_trace(go.Scatter3d(
                     x=[row['x']], y=[row['y']], z=[row['z']],
                     mode='markers+text',
@@ -274,9 +330,46 @@ class ManifoldVisualizer:
                     text=[cid],
                     textposition="top center",
                     textfont=dict(color="#FF007A", size=10),
-                    name=f"NTU: {cid}",
+                    name="Novel Taxonomic Unit (NTU)",
+                    legendgroup="NTU",
+                    showlegend=(i == 0), # Only show once in legend
                     customdata=[cid]
                 ))
+                
+                # Plot Members
+                if not cluster_member_coords.empty:
+                    member_indices = [idx for idx, c in cluster_member_map.items() if c == cid]
+                    if member_indices:
+                        mem_coords = cluster_member_coords.iloc[member_indices]
+                        
+                        fig.add_trace(go.Scatter3d(
+                            x=mem_coords['x'], y=mem_coords['y'], z=mem_coords['z'],
+                            mode='markers',
+                            marker=dict(size=4, color='#FF007A', opacity=0.8),
+                            name="NTU Members",
+                            legendgroup="NTU",
+                            showlegend=False,
+                            hoverinfo='text',
+                            text=[f"Member of {cid}"] * len(mem_coords),
+                            customdata=[cid] * len(mem_coords)
+                        ))
+                        
+                        # Convex Hull for Genomic Volume
+                        if len(mem_coords) >= 4 and ConvexHull:
+                            try:
+                                hull = ConvexHull(mem_coords[['x','y','z']].values)
+                                simplices = hull.simplices
+                                fig.add_trace(go.Mesh3d(
+                                    x=mem_coords['x'].values, y=mem_coords['y'].values, z=mem_coords['z'].values,
+                                    i=simplices[:,0], j=simplices[:,1], k=simplices[:,2],
+                                    color='#FF007A', opacity=0.15,
+                                    name='Genomic Volume',
+                                    legendgroup="NTU",
+                                    showlegend=False,
+                                    hoverinfo='skip'
+                                ))
+                            except Exception as e:
+                                pass
 
         # D. The Query - Dynamic Color
         # Pink if Novel, Green if Known

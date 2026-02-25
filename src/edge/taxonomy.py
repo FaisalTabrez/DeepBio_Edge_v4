@@ -12,7 +12,7 @@ except ImportError:
     process = None
     fuzz = None
 
-from src.edge.config_init import TAXONKIT_EXE_PATH, TAXONOMY_DB_PATH
+from configs.config import TAXONKIT_EXE_PATH, TAXON_DIR, WORMS_ORACLE
 
 # ==========================================
 # @Bio-Taxon: Triple-Tier Hybrid Resolver
@@ -30,9 +30,9 @@ class TaxonomyEngine:
     """
     def __init__(self, tax_data_path: Union[str, None] = None):
         # Config Paths
-        self.tax_data_path = str(tax_data_path) if tax_data_path else str(TAXONOMY_DB_PATH)
+        self.tax_data_path = str(tax_data_path) if tax_data_path else str(TAXON_DIR)
         self.taxonkit_exe = str(TAXONKIT_EXE_PATH)
-        self.worms_csv_path = Path(self.tax_data_path) / "worms_deepsea_ref.csv"
+        self.worms_csv_path = Path(WORMS_ORACLE)
         
         # Load Tier 2: WoRMS Cache
         self.worms_cache = self._load_worms_cache()
@@ -389,17 +389,19 @@ class TaxonomyEngine:
         worms_info = self.validate_worms(working_name)
         
         final_name = working_name
-        lineage_str = ""
-        source = "Vector AI"
+        
+        # Default to NCBI lineage from LanceDB top-match
+        lineage_str = top_hit.get('lineage', 'Unknown')
+        source = "Vector AI (NCBI)"
 
         if worms_info is not None and len(worms_info) > 0:
-            # Oracle Spoke!
+            # Oracle Spoke! Prioritize WoRMS lineage over NCBI
             final_name = worms_info.get('ScientificName', final_name) # Use the clean Oracle name
             source = "WoRMS Oracle"
             lineage_str = f"{worms_info.get('Phylum')}; {worms_info.get('Class')}; {worms_info.get('Order')}; {worms_info.get('Family')}"
         
         # --- TIER 3: TaxonKit FALLBACK ---
-        elif self.taxonkit_active:
+        elif self.taxonkit_active and lineage_str == 'Unknown':
              # Manual lookup using resolve_name_taxonkit assuming that was intended, 
              # or simply log missing method. Based on context, it seems resolve_name_taxonkit is the method.
              # However, the user error says 'expand_lineage_taxonkit' is missing.
