@@ -274,7 +274,8 @@ class ManifoldVisualizer:
                     text=[cid],
                     textposition="top center",
                     textfont=dict(color="#FF007A", size=10),
-                    name=f"NTU: {cid}"
+                    name=f"NTU: {cid}",
+                    customdata=[cid]
                 ))
 
         # D. The Query - Dynamic Color

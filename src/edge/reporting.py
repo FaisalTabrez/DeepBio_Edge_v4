@@ -35,7 +35,7 @@ class ResearchReporter:
                 
         return round(h_prime, 4)
 
-    def generate_expedition_summary(self, session_results: List[Dict], novel_clusters: List[Dict] = None) -> Dict[str, str]:
+    def generate_expedition_summary(self, session_results: List[Dict], novel_clusters: List[Dict] | None = None) -> Dict[str, str | None]:
         """
         Generates the Research Brief containing Taxonomic Summary, Novelty Registry, and Diversity Metrics.
         Saves to E:/DeepBio_Scan/results/ (or configured RESULTS_PATH).

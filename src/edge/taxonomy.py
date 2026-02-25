@@ -261,6 +261,73 @@ class TaxonomyEngine:
             }
         return {}
 
+    def calculate_taxonomic_reliability(self, matches: List[Dict]) -> Dict[str, Any]:
+        """
+        Calculates confidence at each taxonomic rank based on the top 50 neighbors.
+        """
+        ranks = ["Phylum", "Class", "Order", "Family", "Genus", "Species"]
+        rank_counts = {r: Counter() for r in ranks}
+        
+        top_k = matches[:50]
+        if not top_k:
+            return {}
+            
+        # Pre-fetch WoRMS info for unique genera to save time
+        unique_genera = set()
+        for m in top_k:
+            raw_name = m.get('Scientific_Name', m.get('species', 'Unknown'))
+            if isinstance(raw_name, (np.ndarray, list)):
+                sp_name = str(raw_name[0]) if len(raw_name) > 0 else "Unknown"
+            else:
+                sp_name = str(raw_name)
+            parts = sp_name.split()
+            if len(parts) > 0:
+                unique_genera.add(parts[0])
+                
+        genus_to_lineage = {}
+        for g in unique_genera:
+            if g != "Unknown":
+                worms_info = self.validate_worms(g)
+                if worms_info:
+                    genus_to_lineage[g] = worms_info
+                    
+        for m in top_k:
+            raw_name = m.get('Scientific_Name', m.get('species', 'Unknown'))
+            if isinstance(raw_name, (np.ndarray, list)):
+                sp_name = str(raw_name[0]) if len(raw_name) > 0 else "Unknown"
+            else:
+                sp_name = str(raw_name)
+                
+            if sp_name == "Unknown":
+                continue
+                
+            rank_counts["Species"][sp_name] += 1
+            
+            parts = sp_name.split()
+            if len(parts) > 0:
+                genus = parts[0]
+                rank_counts["Genus"][genus] += 1
+                
+                worms_info = genus_to_lineage.get(genus, {})
+                if worms_info:
+                    for r in ["Phylum", "Class", "Order", "Family"]:
+                        val = worms_info.get(r, "Unknown")
+                        if val != "Unknown":
+                            rank_counts[r][val] += 1
+                            
+        total_votes = len(top_k)
+        reliability = {}
+        
+        for r in ranks:
+            if rank_counts[r]:
+                top_val, count = rank_counts[r].most_common(1)[0]
+                conf = count / total_votes
+                reliability[r] = {"name": top_val, "confidence": conf}
+            else:
+                reliability[r] = {"name": "Unknown", "confidence": 0.0}
+                
+        return reliability
+
     def resolve_identity(self, matches: List[Dict]) -> Dict[str, Any]:
         """
         @Bio-Taxon Main Logic Loop: Triple-Tier Resolution.
@@ -298,6 +365,7 @@ class TaxonomyEngine:
 
         # --- TIER 1: VECTOR CONSENSUS ---
         consensus_name, consensus_conf = self.resolve_consensus(matches)
+        reliability = self.calculate_taxonomic_reliability(matches)
         
         # Ensure consensus_name is scalar string
         if isinstance(consensus_name, (np.ndarray, list)):
@@ -373,6 +441,24 @@ class TaxonomyEngine:
         elif top_sim < 0.94:
             status_label = "Divergent / Deep Variant"
 
+        # --- TAXONOMIC RELIABILITY FORMATTING ---
+        taxonomic_reliability_str = ""
+        if is_novel and reliability:
+            # Find the highest rank with > 80% confidence
+            confirmed_rank = None
+            confirmed_name = None
+            for r in ["Phylum", "Class", "Order", "Family"]:
+                if reliability.get(r, {}).get("confidence", 0) > 0.8:
+                    confirmed_rank = r
+                    confirmed_name = reliability[r]["name"]
+            
+            if confirmed_rank:
+                # Find the divergent rank (e.g., Genus < 50%)
+                divergent_name = reliability.get("Genus", {}).get("name", "Unknown")
+                if divergent_name != "Unknown":
+                    taxonomic_reliability_str = f"{confirmed_rank}: {confirmed_name} (Confirmed) | Species: Potential Novel Genus (Divergent from {divergent_name})"
+                else:
+                    taxonomic_reliability_str = f"{confirmed_rank}: {confirmed_name} (Confirmed) | Species: Potential Novel Taxon"
             
         if isinstance(is_novel, (np.ndarray, list)):
              if isinstance(is_novel, np.ndarray):
@@ -395,7 +481,9 @@ class TaxonomyEngine:
             "consensus_name": str(consensus_name),
             "lineage": lineage_str,
             "source_method": source,
-            "vector": vector_data
+            "vector": vector_data,
+            "reliability": reliability,
+            "taxonomic_reliability_str": taxonomic_reliability_str
         }
 
     def format_search_results(self, raw_hits: List[Dict], gene_type: str="COI") -> List[Dict]:

@@ -60,19 +60,54 @@ class DiscoveryEngine:
         """@Embedder-ML: Computes geometric center of the cluster in latent space."""
         return np.mean(vectors, axis=0)
 
-    def _find_nearest_neighbor(self, centroid: np.ndarray) -> Tuple[str, float]:
+    def _find_nearest_neighbor(self, centroid: np.ndarray) -> Tuple[str, float, str, str]:
         """
         Queries the Atlas to find the nearest KNOWN relative to this new cluster.
-        Returns: (Taxon_Name, Distance)
+        Performs a 'Deep Search' (top 50) to find Rank Stability.
+        Returns: (Taxon_Name, Distance, Consensus_Rank, Consensus_Name)
         """
-        # top_k=1 to find closest anchor
-        results = self.atlas.query_vector(centroid, top_k=1)
-        if results:
-            hit = results[0]
-            name = hit.get('Scientific_Name', hit.get('species', 'Unknown'))
-            similarity = hit.get('similarity', 0.0)
-            return name, (1.0 - similarity)
-        return "Unknown", 1.0
+        # top_k=50 for Deep Search
+        results = self.atlas.query_vector(centroid, top_k=50)
+        if not results:
+            return "Unknown", 1.0, "Unknown", "Unknown"
+            
+        # Calculate distance to the absolute nearest known point
+        hit = results[0]
+        name = hit.get('Scientific_Name', hit.get('species', 'Unknown'))
+        similarity = hit.get('similarity', 0.0)
+        distance = 1.0 - similarity
+        
+        # High-Level Consensus: Rank Stability
+        families = []
+        genera = []
+        for r in results:
+            lineage = r.get('lineage', '')
+            if lineage:
+                parts = lineage.split(';')
+                if len(parts) >= 4:
+                    families.append(parts[3].strip())
+                if len(parts) >= 5:
+                    genera.append(parts[4].strip())
+                    
+        family_counts = Counter(families)
+        genus_counts = Counter(genera)
+        
+        consensus_rank = "Unknown"
+        consensus_name = "Unknown"
+        
+        if family_counts:
+            top_family, f_count = family_counts.most_common(1)[0]
+            if f_count >= 35: # 70% of 50
+                consensus_rank = "Family"
+                consensus_name = top_family
+                
+                # Check if genera are mixed
+                if genus_counts:
+                    top_genus, g_count = genus_counts.most_common(1)[0]
+                    if g_count < 35: # Mixed genera
+                        consensus_rank = "Novel Genus within Family"
+                        
+        return name, distance, consensus_rank, consensus_name
 
     def analyze_novelty(self, session_buffer: List[Dict]) -> List[Dict]:
         """
@@ -136,6 +171,10 @@ class DiscoveryEngine:
         discovered_entities = []
         unique_labels = set(labels)
         
+        # Stable ID assignment (Alpha, Beta, Gamma, etc.)
+        greek_alphabet = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon', 'Zeta', 'Eta', 'Theta', 'Iota', 'Kappa']
+        cluster_idx = 0
+        
         for label in unique_labels:
             if label == -1:
                 # Noise points (orphans) - ignore or treat as singletons?
@@ -156,23 +195,54 @@ class DiscoveryEngine:
             representative_seq = cluster_members[rep_idx]
             
             # --- @BioArch: Biological Divergence Hook ---
-            # How far is this group from known biology?
-            nearest_relative, divergence = self._find_nearest_neighbor(centroid)
+            # Deep Search for Rank Stability
+            nearest_relative, centroid_dist, consensus_rank, consensus_name = self._find_nearest_neighbor(centroid)
+            
+            # Calculate the average distance from the cluster members to the nearest 'Known' point
+            member_distances = []
+            for v in cluster_vectors:
+                res = self.atlas.query_vector(v, top_k=1)
+                if res:
+                    member_distances.append(1.0 - res[0].get('similarity', 0.0))
+                else:
+                    member_distances.append(1.0)
+            avg_member_distance = float(np.mean(member_distances)) if member_distances else 1.0
             
             # Generate Provisional ID
-            # e.g. DeepBio-NTU-A1B2
-            # NTU = Novel Taxon Unit
-            otu_id = f"DeepBio-NTU-{str(uuid.uuid4())[:6].upper()}"
+            # e.g. DeepBio-NTU-Modiolidae-Alpha
+            if consensus_name != "Unknown":
+                otu_id = f"DeepBio-NTU-{consensus_name}-{greek_alphabet[cluster_idx % len(greek_alphabet)]}"
+            else:
+                otu_id = f"DeepBio-NTU-Unknown-{greek_alphabet[cluster_idx % len(greek_alphabet)]}"
+            cluster_idx += 1
+            
+            # Divergence Metric
+            if avg_member_distance > 0.25:
+                status = "Candidate New Genus"
+            elif avg_member_distance > 0.03:
+                status = "New Species Group"
+            else:
+                status = "Cryptic Variant Group"
+                
+            if consensus_rank == "Novel Genus within Family":
+                classification = f"Novel Genus within Family {consensus_name}"
+            elif consensus_rank == "Family":
+                classification = f"Novel Species within Family {consensus_name}"
+            else:
+                classification = f"Novel Taxon near {nearest_relative}"
             
             entity = {
                 "otu_id": otu_id,
                 "cluster_size": len(indices),
                 "representative_name": representative_seq['display_name'], # e.g. "Cryptic Bathymodiolus sp."
                 "nearest_relative": nearest_relative,
-                "biological_divergence": divergence,
-                "divergence_pct": f"{divergence*100:.1f}%",
+                "biological_divergence": avg_member_distance,
+                "divergence_pct": f"{avg_member_distance*100:.1f}%",
                 "avg_vector": centroid,
-                "status": "New Species Group" if divergence > 0.03 else "Cryptic Variant Group"
+                "status": status,
+                "classification": classification,
+                "consensus_rank": consensus_rank,
+                "consensus_name": consensus_name
             }
             discovered_entities.append(entity)
             
@@ -188,7 +258,7 @@ if __name__ == "__main__":
             pass 
             
         def query_vector(self, v, top_k):
-            return [{"Scientific_Name": "Rimicaris exoculata", "similarity": 0.85}]
+            return [{"Scientific_Name": "Rimicaris exoculata", "similarity": 0.85, "lineage": "Eukaryota;Metazoa;Arthropoda;Alvinocarididae;Rimicaris;Rimicaris exoculata"}] * top_k
             
     engine = DiscoveryEngine(MockAtlas())
     

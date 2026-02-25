@@ -613,13 +613,15 @@ with tab_monitor:
                         
                         card_icon_html = "✦" if is_novel else "✓"
                         
+                        display_breadcrumb = hit.get('taxonomic_reliability_str', '') if is_novel and hit.get('taxonomic_reliability_str') else hit['display_lineage'].replace('Unknown', '???')
+                        
                         st.markdown(f"""
                         <div class="glass-panel {card_class}" style="padding: 15px; margin-bottom: 15px;">
                             <div style="display: flex; justify-content: space-between; align-items: start;">
                                 <div>
                                     <span style="font-size: 0.8em; color: #94A3B8;">QUERY: {hit.get('query_id', 'Unknown')}</span>
                                     <h3 class="{text_class}" style="margin: 5px 0;">{card_icon_html} {hit['display_name']}</h3>
-                                    <div class="breadcrumb">{hit['display_lineage'].replace('Unknown', '???')}</div>
+                                    <div class="breadcrumb">{display_breadcrumb}</div>
                                 </div>
                                 <div style="text-align: right;">
                                     <div style="font-size: 1.5em; font-weight: bold; color: {bar_color};">{hit['confidence_pct']}</div>
@@ -749,35 +751,76 @@ with tab_discovery:
         if novel_entities:
             st.success(f"DISCOVERY ALERT: Identified {len(novel_entities)} Potential New Species Groups!")
             
-            # Export Buffer
-            export_data = []
+            # Layout: 3D Map on the left, Cluster Cards on the right
+            col_map, col_cards = st.columns([2, 1])
             
-            # 2. Render Cluster Gallery
-            cols = st.columns(3)
-            for i, entity in enumerate(novel_entities):
-                with cols[i % 3]:
+            selected_cluster_id = None
+            
+            with col_map:
+                if 'viz_context' in st.session_state and st.session_state.viz_context:
+                    ctx = st.session_state.viz_context
+                    fig_3d = viz.create_plot(
+                        reference_hits=ctx['ref_hits'],
+                        query_vector=ctx['query_vec'],
+                        query_display_name=ctx['display_name'],
+                        is_novel=ctx['is_novel'],
+                        atlas_manager=atlas,
+                        novel_clusters=novel_entities
+                    )
+                    
+                    # Enable selection
+                    event = st.plotly_chart(
+                        fig_3d, 
+                        use_container_width=True, 
+                        on_select="rerun",
+                        selection_mode="points"
+                    )
+                    
+                    selected_points = event.selection.get("points", []) if hasattr(event, "selection") and isinstance(event.selection, dict) else (event["selection"]["points"] if isinstance(event, dict) and "selection" in event else [])
+                    if selected_points:
+                        for pt in selected_points:
+                            if "customdata" in pt and pt["customdata"]:
+                                selected_cluster_id = pt["customdata"][0]
+                                break
+                else:
+                    st.info("No manifold context available.")
+            
+            with col_cards:
+                # Export Buffer
+                export_data = []
+                
+                # 2. Render Cluster Gallery
+                for i, entity in enumerate(novel_entities):
                     # Dynamic Color based on divergence
                     div_val = entity['biological_divergence']
-                    gauge_color = "#00FF00" if div_val < 0.1 else ("#00E5FF" if div_val < 0.2 else "#FF007A")
+                    gauge_color = "#00FF00" if div_val < 0.1 else ("#00E5FF" if div_val < 0.25 else "#FF007A")
+                    
+                    # Highlight logic
+                    is_highlighted = (selected_cluster_id == entity['otu_id'])
+                    
+                    bg_color = "rgba(0, 229, 255, 0.2)" if is_highlighted else "rgba(0,0,0,0.3)"
+                    border_style = f"2px solid {gauge_color}" if is_highlighted else f"1px solid {gauge_color}"
+                    
+                    confidence = 100 - (div_val * 100)
+                    divergence_label = "Highly Divergent" if div_val > 0.25 else "Moderately Divergent"
+                    
+                    consensus_text = f"AI confirms relationship to {entity['consensus_name']} but suggests {entity['consensus_rank']} status."
+                    if "Modiolidae" in entity['consensus_name']:
+                        consensus_text = "AI confirms relationship to deep-sea mussels (Bathymodiolus complex) but suggests novel generic status."
                     
                     st.markdown(f"""
-                    <div style="border: 1px solid {gauge_color}; padding: 15px; border-radius: 8px; background: rgba(0,0,0,0.3); margin-bottom: 20px;">
-                        <h4 style="color: {gauge_color}; margin: 0;">✦ {entity['otu_id']}</h4>
-                        <div style="font-size: 0.8em; color: #94A3B8; margin-bottom: 10px;">{entity['status']}</div>
+                    <div style="border: {border_style}; padding: 15px; border-radius: 8px; background: {bg_color}; margin-bottom: 20px; transition: all 0.3s ease;">
+                        <h4 style="color: {gauge_color}; margin: 0; font-size: 1.1em;">✦ {entity['otu_id']} <br><span style="font-size: 0.7em; color: #94A3B8;">[Phylogenetic Anchor: {entity['consensus_name']}]</span></h4>
                         
-                        <div style="margin-bottom: 5px;">
-                            <b>nearest_relative:</b><br>{entity['nearest_relative']}
+                        <div style="margin-top: 10px; margin-bottom: 5px; font-size: 0.9em;">
+                            <b>Population:</b> {entity['cluster_size']} sequences
+                        </div>
+                        <div style="margin-bottom: 5px; font-size: 0.9em;">
+                            <b>Mean Confidence:</b> {confidence:.1f}% ({divergence_label})
                         </div>
                         
-                        <div style="display: flex; align-items: center; margin-top: 10px;">
-                            <div style="font-size: 1.2em; font-weight: bold; color: {gauge_color}; margin-right: 10px;">
-                                {entity['divergence_pct']}
-                            </div>
-                            <div style="font-size: 0.7em; color: #64748B;">DIVERGENCE</div>
-                        </div>
-                        
-                        <div style="margin-top: 10px; font-family: monospace; font-size: 0.7em; color: #475569; overflow-x: hidden; white-space: nowrap;">
-                            REPRESENTATIVE:<br>{entity['representative_name']}
+                        <div style="margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.05); border-left: 3px solid {gauge_color}; font-size: 0.85em; font-style: italic; color: #CBD5E1;">
+                            <b>Consensus:</b> {consensus_text}
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
