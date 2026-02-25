@@ -36,6 +36,7 @@ from src.edge.database import AtlasManager
 from src.edge.taxonomy import TaxonomyEngine
 from src.edge.discovery import DiscoveryEngine
 from src.edge.parser import stream_sequences
+from src.edge.reporting import ResearchReporter
 from src.interface.visualizer import ManifoldVisualizer
 from src.interface.docs import render_docs
 
@@ -438,6 +439,24 @@ with tab_monitor:
             start_btn = col_act1.button("INITIATE STREAM", use_container_width=True, icon=":material/play_arrow:")
             stop_btn = col_act2.button("STOP INFERENCE", use_container_width=True, icon=":material/stop:")
             
+            st.divider()
+            export_btn = st.button("EXPORT RESEARCH BRIEF", use_container_width=True, icon=":material/download:")
+            
+            if export_btn:
+                if st.session_state.scan_results_buffer:
+                    with st.spinner("Generating Research Brief..."):
+                        reporter = ResearchReporter()
+                        novel_clusters = st.session_state.get('novel_clusters', [])
+                        report_paths = reporter.generate_expedition_summary(
+                            st.session_state.scan_results_buffer, 
+                            novel_clusters
+                        )
+                        if report_paths:
+                            st.success(f"Research Brief Exported to {reporter.results_dir}")
+                            log_event(f"SUCCESS: Research Brief exported to {reporter.results_dir}")
+                else:
+                    st.warning("No session data available to export.")
+            
             if start_btn:
                 log_event(f"Mounting File: {file_details['Filename']}")
                 log_event("Loading Local CPU Inference Engine...")
@@ -554,70 +573,127 @@ with tab_monitor:
         
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # 4. Results Loop (Discovery Cards)
+    # 4. Results Loop (Discovery Cards) & Community Composition
     with col_results:
-        st.markdown("### ANALYSIS FEED")
+        st.markdown("### ANALYSIS FEED & COMMUNITY COMPOSITION")
         
-        # Container for scrollable results
-        results_container = st.container(height=600)
+        # Create tabs for Feed vs Composition
+        feed_tab, comp_tab = st.tabs(["LIVE FEED", "COMMUNITY COMPOSITION"])
         
-        if st.session_state.scan_results_buffer and len(st.session_state.scan_results_buffer) > 0:
-            with results_container:
-                for hit in st.session_state.scan_results_buffer:
-                    # Determine Styling
-                    raw_novel = hit.get('is_novel', False)
-                    is_novel = False
-                    if isinstance(raw_novel, np.ndarray):
-                         is_novel = bool(raw_novel.item()) if raw_novel.size == 1 else raw_novel.any()
-                    else:
-                         is_novel = bool(raw_novel)
+        with feed_tab:
+            # Container for scrollable results
+            results_container = st.container(height=600)
+            
+            if st.session_state.scan_results_buffer and len(st.session_state.scan_results_buffer) > 0:
+                with results_container:
+                    for hit in st.session_state.scan_results_buffer:
+                        # Determine Styling
+                        raw_novel = hit.get('is_novel', False)
+                        is_novel = False
+                        if isinstance(raw_novel, np.ndarray):
+                             is_novel = bool(raw_novel.item()) if raw_novel.size == 1 else raw_novel.any()
+                        else:
+                             is_novel = bool(raw_novel)
 
-                    card_class = "discovery-card-novel" if is_novel else "discovery-card-known"
-                    
-                    # Icons & Labels
-                    icon_code = ":material/new_releases:" if is_novel else ":material/check_circle:"
-                    status_prefix = "[NOVEL]" if is_novel else "[KNOWN]"
-                    
-                    text_class = "neon-text-pink" if is_novel else "neon-text-cyan"
-                    bar_color = "#FF007A" if is_novel else "#00E5FF"
-                    
-                    # Confidence Calculation for Bar
-                    sim_pct = hit['similarity'] * 100
-                    
-                    # HTML Card
-                    # We inject Material Icons via simple text or span since HTML in markdown doesn't parse :icon: syntax directly
-                    # Actually, Streamlit Markdown supports symbols. For HTML block we use text fallback.
-                    
-                    card_icon_html = "✦" if is_novel else "✓"
-                    
-                    st.markdown(f"""
-                    <div class="glass-panel {card_class}" style="padding: 15px; margin-bottom: 15px;">
-                        <div style="display: flex; justify-content: space-between; align-items: start;">
-                            <div>
-                                <span style="font-size: 0.8em; color: #94A3B8;">QUERY: {hit.get('query_id', 'Unknown')}</span>
-                                <h3 class="{text_class}" style="margin: 5px 0;">{card_icon_html} {hit['display_name']}</h3>
-                                <div class="breadcrumb">{hit['display_lineage'].replace('Unknown', '???')}</div>
+                        card_class = "discovery-card-novel" if is_novel else "discovery-card-known"
+                        
+                        # Icons & Labels
+                        icon_code = ":material/new_releases:" if is_novel else ":material/check_circle:"
+                        status_prefix = "[NOVEL]" if is_novel else "[KNOWN]"
+                        
+                        text_class = "neon-text-pink" if is_novel else "neon-text-cyan"
+                        bar_color = "#FF007A" if is_novel else "#00E5FF"
+                        
+                        # Confidence Calculation for Bar
+                        sim_pct = hit['similarity'] * 100
+                        
+                        # HTML Card
+                        # We inject Material Icons via simple text or span since HTML in markdown doesn't parse :icon: syntax directly
+                        # Actually, Streamlit Markdown supports symbols. For HTML block we use text fallback.
+                        
+                        card_icon_html = "✦" if is_novel else "✓"
+                        
+                        st.markdown(f"""
+                        <div class="glass-panel {card_class}" style="padding: 15px; margin-bottom: 15px;">
+                            <div style="display: flex; justify-content: space-between; align-items: start;">
+                                <div>
+                                    <span style="font-size: 0.8em; color: #94A3B8;">QUERY: {hit.get('query_id', 'Unknown')}</span>
+                                    <h3 class="{text_class}" style="margin: 5px 0;">{card_icon_html} {hit['display_name']}</h3>
+                                    <div class="breadcrumb">{hit['display_lineage'].replace('Unknown', '???')}</div>
+                                </div>
+                                <div style="text-align: right;">
+                                    <div style="font-size: 1.5em; font-weight: bold; color: {bar_color};">{hit['confidence_pct']}</div>
+                                    <div style="font-size: 0.7em; color: #64748B;">CONFIDENCE</div>
+                                </div>
                             </div>
-                            <div style="text-align: right;">
-                                <div style="font-size: 1.5em; font-weight: bold; color: {bar_color};">{hit['confidence_pct']}</div>
-                                <div style="font-size: 0.7em; color: #64748B;">CONFIDENCE</div>
+                            <div style="margin-top: 10px; background: #0F172A; height: 6px; border-radius: 3px; overflow: hidden;">
+                                <div style="width: {sim_pct}%; background: {bar_color}; height: 100%; box-shadow: 0 0 10px {bar_color};"></div>
+                            </div>
+                            <div style="margin-top: 8px; font-size: 0.85em; color: #CBD5E1;">
+                                TYPE: <b>{status_prefix}</b> | STATUS: {hit['status'].upper()}
+                            </div>
+                            <div style="margin-top: 4px; font-size: 0.75em; color: #94A3B8; font-style: italic;">
+                                Analyzed 50 neighbors in latent space. Consensus: {hit.get('consensus_name', 'Unknown').split(' ')[0]}
                             </div>
                         </div>
-                        <div style="margin-top: 10px; background: #0F172A; height: 6px; border-radius: 3px; overflow: hidden;">
-                            <div style="width: {sim_pct}%; background: {bar_color}; height: 100%; box-shadow: 0 0 10px {bar_color};"></div>
-                        </div>
-                        <div style="margin-top: 8px; font-size: 0.85em; color: #CBD5E1;">
-                            TYPE: <b>{status_prefix}</b> | STATUS: {hit['status'].upper()}
-                        </div>
-                        <div style="margin-top: 4px; font-size: 0.75em; color: #94A3B8; font-style: italic;">
-                            Analyzed 50 neighbors in latent space. Consensus: {hit.get('consensus_name', 'Unknown').split(' ')[0]}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                        """, unsafe_allow_html=True)
+                    
+            else:
+                with results_container:
+                    st.info("Waiting for Scan Data... System Idle.")
+                    
+        with comp_tab:
+            if st.session_state.scan_results_buffer and len(st.session_state.scan_results_buffer) > 0:
+                # Build hierarchy data for Sunburst
+                hierarchy_data = []
+                for hit in st.session_state.scan_results_buffer:
+                    lineage = hit.get('display_lineage', 'Unknown;Unknown;Unknown;Unknown;Unknown')
+                    parts = lineage.split(';')
+                    
+                    # Pad or truncate to ensure we have Phylum, Class, Order, Family, Genus
+                    while len(parts) < 5:
+                        parts.append('Unknown')
+                    
+                    phylum = parts[0].strip() if parts[0].strip() else 'Unknown'
+                    class_name = parts[1].strip() if parts[1].strip() else 'Unknown'
+                    order = parts[2].strip() if parts[2].strip() else 'Unknown'
+                    genus = parts[4].strip() if len(parts) > 4 and parts[4].strip() else 'Unknown'
+                    
+                    hierarchy_data.append({
+                        'Phylum': phylum,
+                        'Class': class_name,
+                        'Order': order,
+                        'Genus': genus,
+                        'Count': 1
+                    })
                 
-        else:
-            with results_container:
-                st.info("Waiting for Scan Data... System Idle.")
+                df_comp = pd.DataFrame(hierarchy_data)
+                
+                # Create Sunburst Chart
+                fig_sunburst = px.sunburst(
+                    df_comp, 
+                    path=['Phylum', 'Class', 'Order', 'Genus'], 
+                    values='Count',
+                    color='Phylum',
+                    color_discrete_sequence=px.colors.sequential.Tealgrn, # Bioluminescent gradient
+                    title="Real-Time Community Composition"
+                )
+                
+                fig_sunburst.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='#E2E8F0', family='Consolas'),
+                    margin=dict(t=40, l=0, r=0, b=0)
+                )
+                
+                fig_sunburst.update_traces(
+                    hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Parent: %{parent}',
+                    marker=dict(line=dict(color='#0A0F1E', width=1))
+                )
+                
+                st.plotly_chart(fig_sunburst, use_container_width=True)
+            else:
+                st.info("Waiting for Scan Data to generate Community Composition...")
 
     # 5. System Logs
     st.markdown("### SYSTEM LOGS")

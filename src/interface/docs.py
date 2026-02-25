@@ -147,4 +147,24 @@ def render_docs():
     """, unsafe_allow_html=True)
 
     st.markdown("---")
+
+    # --- Section 5: Data Engineering & Vector Indexing ---
+    st.markdown("## 5. DATA ENGINEERING & VECTOR INDEXING", unsafe_allow_html=True)
+    st.markdown("The system is optimized for edge deployment, utilizing a high-performance vector database to manage large-scale genomic data.")
+    
+    st.markdown("""
+    ### REFERENCE SCALE: 100,000 MARINE GENOMIC SIGNATURES
+    The core reference atlas contains 100,000 high-quality 18S and COI sequences, embedded into a 768-dimensional latent space.
+    
+    ### INDEXING ARCHITECTURE: IVF-128 / PQ-96
+    To achieve sub-10ms search latency on local SSDs, the database employs an **Inverted File Index with Product Quantization (IVF-PQ)**.
+    
+    *   **IVF-128**: The latent space is partitioned into 128 Voronoi cells. During a query, only the nearest cells are searched, reducing the algorithmic complexity from $O(N)$ to $O(\sqrt{N})$.
+    *   **PQ-96**: Vectors are compressed into 96 sub-spaces, drastically reducing memory footprint while preserving semantic topology.
+    
+    ### REAL-TIME CLUSTERING
+    Non-Reference Taxa (NRT) are dynamically clustered using **HDBSCAN** directly on the latent representations, enabling real-time discovery of novel taxonomic units without requiring full database retraining.
+    """, unsafe_allow_html=True)
+
+    st.markdown("---")
     st.caption("DeepBio-Scan v4.2 | Edge-Native Taxonomic Inference | Built for Expedition Use")

@@ -28,6 +28,7 @@ BASE_PATH = get_base_path()
 DB_PATH = BASE_PATH / 'data' / 'db'
 RAW_PATH = BASE_PATH / 'data' / 'raw'
 LOGS_PATH = BASE_PATH / 'logs'
+RESULTS_PATH = BASE_PATH / 'results'
 
 # Taxonomy specific paths (External dependencies on the drive)
 # The user specified E:/DeepBio_Scan/data/taxonomy_db
@@ -40,7 +41,7 @@ def initialize_folders():
     Ensures the directory structure exists on the target drive.
     Does not overwrite existing data.
     """
-    dirs_to_create = [DB_PATH, RAW_PATH, LOGS_PATH]
+    dirs_to_create = [DB_PATH, RAW_PATH, LOGS_PATH, RESULTS_PATH]
     
     # We do not verify TAXONOMY_DB_PATH creation here as it's a pre-requisite provided by user
     
