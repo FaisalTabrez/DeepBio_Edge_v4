@@ -452,11 +452,11 @@ class ManifoldVisualizer:
                             try:
                                 fig.add_trace(go.Mesh3d(
                                     x=mem_coords['x'].values, y=mem_coords['y'].values, z=mem_coords['z'].values,
-                                    color='#FF007A', opacity=0.2,
-                                    alphahull=5,
-                                    name='Genomic Volume',
+                                    color='#FF007A', opacity=0.15,
+                                    alphahull=7,
+                                    name='Discovery Cluster',
                                     legendgroup="NTU",
-                                    showlegend=False,
+                                    showlegend=True if i == 0 else False, # Show in legend once
                                     hoverinfo='skip'
                                 ))
                             except Exception as e:

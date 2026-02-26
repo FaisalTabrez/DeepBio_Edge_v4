@@ -536,10 +536,12 @@ with tab_monitor:
                             top_hit = formatted_results[0]
                             top_hit['query_id'] = seq_id # Track query ID
                             top_hit['raw_sequence'] = raw_seq # Store raw sequence for FASTA export
-                            st.session_state.scan_results_buffer.insert(0, top_hit)
                             
-                            # Ensure vector is stored flat for viz
+                            # Ensure vector is stored flat for viz and clustering
                             vec_flat = vector.flatten() if isinstance(vector, np.ndarray) else vector
+                            top_hit['vector'] = vec_flat # Explicitly attach vector to the result object
+                            
+                            st.session_state.scan_results_buffer.insert(0, top_hit)
 
                             # Store Context for Tab 2 Visualizer
                             st.session_state.viz_context = {
@@ -570,7 +572,8 @@ with tab_monitor:
                     
                     # Run Discovery Engine Immediately
                     # Explicit length check to avoid ambiguity if buffer became array-like
-                    if len(st.session_state.scan_results_buffer) > 0:
+                    if len(st.session_state.scan_results_buffer) >= 5:
+                         st.info("Running Unsupervised Discovery on session buffer...")
                          try:
                              clusters = discovery.analyze_novelty(st.session_state.scan_results_buffer)
                              st.session_state.novel_clusters = clusters

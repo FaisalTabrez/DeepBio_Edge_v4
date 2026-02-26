@@ -436,12 +436,30 @@ class TaxonomyEngine:
         else:
              has_worms = bool(worms_info)
         
-        if top_sim < 0.85 and not has_worms:
+        if top_sim < 0.40:
+            is_novel = True
+            status_label = "DARK TAXON"
+        elif top_sim < 0.85 and not has_worms:
             is_novel = True
             status_label = "POTENTIAL NOVEL TAXON"
-            final_name = f"Cryptic {final_name} sp."
         elif top_sim < 0.94:
             status_label = "Divergent / Deep Variant"
+
+        if is_novel and reliability:
+            family_conf = reliability.get("Family", {}).get("confidence", 0)
+            family_name = reliability.get("Family", {}).get("name", "Unknown")
+            
+            phylum_conf = reliability.get("Phylum", {}).get("confidence", 0)
+            phylum_name = reliability.get("Phylum", {}).get("name", "Unknown")
+            
+            if family_conf >= 0.80 and family_name != "Unknown":
+                final_name = f"Potential Novel Genus [Family: {family_name}]"
+            elif phylum_conf >= 0.80 and phylum_name != "Unknown":
+                final_name = f"Potential Novel Family [Phylum: {phylum_name}]"
+            else:
+                final_name = "Unclassified Dark Taxon"
+        elif is_novel:
+            final_name = f"Cryptic {final_name} sp."
 
         # --- TAXONOMIC RELIABILITY FORMATTING ---
         taxonomic_reliability_str = ""
