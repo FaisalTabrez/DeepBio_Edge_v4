@@ -14,10 +14,10 @@ from pathlib import Path
 # Create a module path fix for locating src modules if run from root
 sys.path.append(os.getcwd())
 
-from src.edge.config import initialize_folders, TAXON_DIR
+from src.edge.config_init import initialize_folders, TAXONOMY_DB_PATH
 
 # Set TaxonKit DB Path (Windows Compatible)
-os.environ["TAXONKIT_DB"] = str(TAXON_DIR)
+os.environ["TAXONKIT_DB"] = str(TAXONOMY_DB_PATH)
 
 # Initialize Directory Structure on Pendrive (or local)
 initialize_folders()
@@ -343,7 +343,7 @@ tab_monitor, tab_visualizer, tab_discovery, tab_report, tab_docs = st.tabs([
     "DOCUMENTATION"
 ])
 
-from src.edge.config import LOG_FILE
+from src.edge.config_init import LOGS_PATH
 
 # One-time Setup
 if 'logger_setup' not in st.session_state:
@@ -360,11 +360,12 @@ def display_terminal_logs():
     """
     Reads the physical log file on the E: Drive (or local) and displays it.
     """
-    if not LOG_FILE.exists():
+    log_file = LOGS_PATH / 'session.log'
+    if not log_file.exists():
         return "INFO: Waiting for system logs..."
         
     try:
-        with open(LOG_FILE, 'r', encoding='utf-8') as f:
+        with open(log_file, 'r', encoding='utf-8') as f:
             lines = f.readlines()
             # Get last 20 lines
             last_lines = lines[-20:] if len(lines) > 20 else lines
@@ -837,7 +838,13 @@ with tab_discovery:
                 )
                 
                 selected_cluster_id = None
-                selected_points = event.selection.get("points", []) if hasattr(event, "selection") and isinstance(event.selection, dict) else (event["selection"]["points"] if isinstance(event, dict) and "selection" in event else [])
+                if isinstance(event, dict) and "selection" in event:
+                    selected_points = event["selection"].get("points", [])
+                elif hasattr(event, "selection") and isinstance(event.selection, dict):
+                    selected_points = event.selection.get("points", [])
+                else:
+                    selected_points = []
+                    
                 if selected_points:
                     for pt in selected_points:
                         if "customdata" in pt and pt["customdata"]:

@@ -116,21 +116,28 @@ class ManifoldVisualizer:
                 return pd.DataFrame()
 
             pca.fit(fit_data)
+            logger.info("[VISUALIZER] PCA Fit successful on 768-dim manifold. Projection active.")
             
             # --- TRANSFORM ---
             df_bg = pd.DataFrame()
             if background_vectors is not None and len(background_vectors) > 0:
                  pca_bg = pca.transform(background_vectors)
+                 # @Embedder-ML: Projection Defense
+                 pca_bg = np.nan_to_num(pca_bg, nan=0.0, posinf=0.0, neginf=0.0)
                  df_bg = pd.DataFrame(pca_bg, columns=['x', 'y', 'z'])
                  df_bg['type'] = 'background'
             
             df_ref = pd.DataFrame()
             if len(ref_vectors) > 0:
                 pca_ref = pca.transform(ref_vectors)
+                # @Embedder-ML: Projection Defense
+                pca_ref = np.nan_to_num(pca_ref, nan=0.0, posinf=0.0, neginf=0.0)
                 df_ref = pd.DataFrame(pca_ref, columns=['x', 'y', 'z'])
                 df_ref['type'] = 'reference'
             
             pca_query = pca.transform(query_vector.reshape(1, -1))
+            # @Embedder-ML: Projection Defense
+            pca_query = np.nan_to_num(pca_query, nan=0.0, posinf=0.0, neginf=0.0)
             df_query = pd.DataFrame(pca_query, columns=['x', 'y', 'z'])
             df_query['type'] = 'query'
             
@@ -138,12 +145,16 @@ class ManifoldVisualizer:
             df_clusters = pd.DataFrame()
             if cluster_vectors is not None and len(cluster_vectors) > 0:
                  pca_clus = pca.transform(cluster_vectors)
+                 # @Embedder-ML: Projection Defense
+                 pca_clus = np.nan_to_num(pca_clus, nan=0.0, posinf=0.0, neginf=0.0)
                  df_clusters = pd.DataFrame(pca_clus, columns=['x', 'y', 'z'])
                  df_clusters['type'] = 'cluster_point'
 
             df_cluster_members = pd.DataFrame()
             if cluster_member_vectors is not None and len(cluster_member_vectors) > 0:
                  pca_clus_mem = pca.transform(cluster_member_vectors)
+                 # @Embedder-ML: Projection Defense
+                 pca_clus_mem = np.nan_to_num(pca_clus_mem, nan=0.0, posinf=0.0, neginf=0.0)
                  df_cluster_members = pd.DataFrame(pca_clus_mem, columns=['x', 'y', 'z'])
                  df_cluster_members['type'] = 'cluster_member'
 
@@ -194,9 +205,11 @@ class ManifoldVisualizer:
             if 'vector' in self.background_cloud_df.columns:
                  # Clean nans if any
                  bg_clean = self.background_cloud_df.dropna(subset=['vector'])
-                 bg_list = bg_clean['vector'].tolist()
-                 if bg_list:
-                    bg_vecs_np = np.vstack(bg_list)
+                 # @Embedder-ML: Vector Unpacking Fix
+                 # Ensure the 'vector' column is correctly converted into a 2D NumPy array of shape (5000, 768)
+                 bg_list = bg_clean['vector'].values
+                 if len(bg_list) > 0:
+                    bg_vecs_np = np.stack(bg_list)
                     valid_bg = bg_clean.to_dict('records')
 
         # 4. Extract Cluster Vectors
@@ -416,9 +429,9 @@ class ManifoldVisualizer:
         # Layout Styling - Scientific / Lab
         fig.update_layout(
             scene=dict(
-                xaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title=''),
-                yaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title=''),
-                zaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title=''),
+                xaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title='', autorange=True),
+                yaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title='', autorange=True),
+                zaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title='', autorange=True),
                 bgcolor='rgba(0,0,0,0)'
             ),
             paper_bgcolor='rgba(0,0,0,0)',

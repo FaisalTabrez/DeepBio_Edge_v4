@@ -105,12 +105,19 @@ class NucleotideEmbedder:
                     logger.error(f"Shape Defense Triggered! Expected dim {self.hidden_dim}, got {mean_embeddings.shape[1]}")
                     raise ValueError("Embedding dimension integrity compromised.")
                 
-                all_embeddings.append(mean_embeddings.cpu().numpy())
+                all_embeddings.append(mean_embeddings.cpu().numpy().astype(np.float32))
 
         if not all_embeddings:
-            return np.empty((0, self.hidden_dim))
+            return np.empty((0, 768), dtype=np.float32)
 
-        final_tensor = np.concatenate(all_embeddings, axis=0)
+        final_tensor = np.concatenate(all_embeddings, axis=0).astype(np.float32)
+        
+        # @Embedder-ML: Dimension Defense
+        if final_tensor.shape[1] == 512:
+            padding = np.zeros((final_tensor.shape[0], 768 - 512), dtype=np.float32)
+            final_tensor = np.concatenate([final_tensor, padding], axis=1)
+            logger.info("[EMBEDDER] Local vector transformed from 512 to 768 for index compatibility.")
+            
         logger.info(f"Latent Space Generation Complete. Tensor Shape: {final_tensor.shape}")
         return final_tensor
 
