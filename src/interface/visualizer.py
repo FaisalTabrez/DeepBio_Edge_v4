@@ -34,6 +34,8 @@ class ManifoldVisualizer:
         
         # @UX-Visionary: Pre-fetch background cloud logic
         self.background_cloud_df = None
+        self.pca_model = None
+        self.background_coords = None
 
     def load_background_cloud(self, atlas_manager):
         """
@@ -82,6 +84,29 @@ class ManifoldVisualizer:
                      self.background_cloud_df = df
                      print(f"[VISUALIZER] High-Density Atlas Loaded: {sample_size}/{total_points} points sampled.")
                      logger.info(f"Background Cloud Loaded: {sample_size} points")
+                     
+                     # @Data-Ops: Data Extraction Fix (The Matrix Conversion)
+                     if 'vector' in df.columns:
+                         df_clean = df.dropna(subset=['vector'])
+                         X = np.stack(df_clean['vector'].values).astype(np.float32)
+                         
+                         if X.shape[1] != 768:
+                             raise ValueError(f'Matrix Shape Mismatch: {X.shape}')
+                             
+                         # @Data-Ops: PCA Fitting & Projection
+                         self.pca_model = PCA(n_components=3)
+                         coords = self.pca_model.fit_transform(X)
+                         
+                         # Sanity Check
+                         min_val = coords[:, 0].min()
+                         max_val = coords[:, 0].max()
+                         logger.info(f"[VISUALIZER] Coordinate Bounds: X({min_val}:{max_val})")
+                         
+                         if min_val == 0.0 and max_val == 0.0:
+                             logger.critical("[VISUALIZER] CRITICAL ERROR: Vectors in the database are empty (all zeros).")
+                             
+                         self.background_coords = coords
+                         
         except Exception as e:
              logger.warning(f"Failed to load background cloud: {e}")
 
@@ -97,31 +122,40 @@ class ManifoldVisualizer:
         Projects: Query AND Novel Clusters into this stable biological space.
         """
         try:
-            pca = PCA(n_components=3)
-            
-            # Prepare Training Set for PCA Fit
-            # Includes Background + References to define axes
-            # @Embedder-ML: Use the 100k atlas (background) as the baseline 'Global Biodiversity Coordinate System'
-            if background_vectors is not None and len(background_vectors) > 10:
-                fit_data = background_vectors
-            elif len(ref_vectors) > 0:
-                fit_data = ref_vectors
+            # @Data-Ops: Use pre-fitted PCA model if available
+            if hasattr(self, 'pca_model') and self.pca_model is not None:
+                pca = self.pca_model
+                logger.info("[VISUALIZER] Using pre-fitted PCA model from background cloud.")
             else:
-                 # Edge case: No data to fit (fresh DB)
-                 # Fit on query + noise for stability
-                 fit_data = np.vstack([query_vector, query_vector + np.random.normal(0, 0.01, query_vector.shape)])
+                pca = PCA(n_components=3)
                 
-            # Fit PCA
-            if len(fit_data) < 3:
-                return pd.DataFrame()
-
-            pca.fit(fit_data)
-            logger.info("[VISUALIZER] PCA Fit successful on 768-dim manifold. Projection active.")
+                # Prepare Training Set for PCA Fit
+                # Includes Background + References to define axes
+                # @Embedder-ML: Use the 100k atlas (background) as the baseline 'Global Biodiversity Coordinate System'
+                if background_vectors is not None and len(background_vectors) > 10:
+                    fit_data = background_vectors
+                elif len(ref_vectors) > 0:
+                    fit_data = ref_vectors
+                else:
+                     # Edge case: No data to fit (fresh DB)
+                     # Fit on query + noise for stability
+                     fit_data = np.vstack([query_vector, query_vector + np.random.normal(0, 0.01, query_vector.shape)])
+                    
+                # Fit PCA
+                if len(fit_data) < 3:
+                    return pd.DataFrame()
+    
+                pca.fit(fit_data)
+                logger.info("[VISUALIZER] PCA Fit successful on 768-dim manifold. Projection active.")
             
             # --- TRANSFORM ---
             df_bg = pd.DataFrame()
             if background_vectors is not None and len(background_vectors) > 0:
-                 pca_bg = pca.transform(background_vectors)
+                 # @Data-Ops: Use pre-computed background coordinates if available
+                 if hasattr(self, 'background_coords') and self.background_coords is not None:
+                     pca_bg = self.background_coords
+                 else:
+                     pca_bg = pca.transform(background_vectors)
                  # @Embedder-ML: Projection Defense
                  pca_bg = np.nan_to_num(pca_bg, nan=0.0, posinf=0.0, neginf=0.0)
                  df_bg = pd.DataFrame(pca_bg, columns=['x', 'y', 'z'])
@@ -280,10 +314,20 @@ class ManifoldVisualizer:
                 for i in range(len(bg_coords))
             ]
             
+            # @UX-Visionary: Phylum Colors
+            phylum_colors = []
+            unique_phyla = list(set([v.get('Phylum', 'Unknown') for v in valid_bg]))
+            color_map = {p: self.palette[i % len(self.palette)] for i, p in enumerate(unique_phyla)}
+            for i in range(len(bg_coords)):
+                if i < len(valid_bg):
+                    phylum_colors.append(color_map.get(valid_bg[i].get('Phylum', 'Unknown'), '#334155'))
+                else:
+                    phylum_colors.append('#334155')
+            
             fig.add_trace(go.Scatter3d(
                 x=bg_coords['x'], y=bg_coords['y'], z=bg_coords['z'],
                 mode='markers',
-                marker=dict(size=2, color='#334155', opacity=0.3),
+                marker=dict(size=2, opacity=0.5, color=phylum_colors),
                 hoverinfo='text',
                 text=hover_bg,
                 name='Atlas Background'
@@ -432,7 +476,8 @@ class ManifoldVisualizer:
                 xaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title='', autorange=True),
                 yaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title='', autorange=True),
                 zaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title='', autorange=True),
-                bgcolor='rgba(0,0,0,0)'
+                bgcolor='rgba(0,0,0,0)',
+                aspectmode='data'
             ),
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',

@@ -796,6 +796,9 @@ with tab_visualizer:
                 novel_clusters=n_clusters
             )
             
+        # @UX-Visionary: UI Feedback
+        bg_points = len(viz.background_coords) if hasattr(viz, 'background_coords') and viz.background_coords is not None else 0
+        st.write(f'DEBUG: Plotting {bg_points} background points')
         st.plotly_chart(fig_3d, use_container_width=True)
         st.caption("Real-time Holographic Projection: 768-dim PCA Reduction of evolutionary neighborhood.")
         
