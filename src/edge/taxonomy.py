@@ -446,21 +446,43 @@ class TaxonomyEngine:
         # --- TAXONOMIC RELIABILITY FORMATTING ---
         taxonomic_reliability_str = ""
         if is_novel and reliability:
-            # Find the highest rank with > 80% confidence
-            confirmed_rank = None
-            confirmed_name = None
-            for r in ["Phylum", "Class", "Order", "Family"]:
-                if reliability.get(r, {}).get("confidence", 0) > 0.8:
-                    confirmed_rank = r
-                    confirmed_name = reliability[r]["name"]
+            # Hierarchical Consensus Inference
+            # 90% Phylum -> Confirmed, 70% Class -> Probable, <30% Species -> NOVEL SPECIES
+            hierarchy_parts = []
             
-            if confirmed_rank:
-                # Find the divergent rank (e.g., Genus < 50%)
-                divergent_name = reliability.get("Genus", {}).get("name", "Unknown")
-                if divergent_name != "Unknown":
-                    taxonomic_reliability_str = f"{confirmed_rank}: {confirmed_name} (Confirmed) | Species: Potential Novel Genus (Divergent from {divergent_name})"
-                else:
-                    taxonomic_reliability_str = f"{confirmed_rank}: {confirmed_name} (Confirmed) | Species: Potential Novel Taxon"
+            # Phylum
+            phylum_conf = reliability.get("Phylum", {}).get("confidence", 0)
+            phylum_name = reliability.get("Phylum", {}).get("name", "Unknown")
+            if phylum_conf >= 0.90 and phylum_name != "Unknown":
+                hierarchy_parts.append(f"{phylum_name} ({phylum_conf*100:.0f}%)")
+            
+            # Class
+            class_conf = reliability.get("Class", {}).get("confidence", 0)
+            class_name = reliability.get("Class", {}).get("name", "Unknown")
+            if class_conf >= 0.70 and class_name != "Unknown":
+                hierarchy_parts.append(f"{class_name} ({class_conf*100:.0f}%)")
+                
+            # Order
+            order_conf = reliability.get("Order", {}).get("confidence", 0)
+            order_name = reliability.get("Order", {}).get("name", "Unknown")
+            if order_conf >= 0.50 and order_name != "Unknown":
+                hierarchy_parts.append(f"{order_name} ({order_conf*100:.0f}%)")
+                
+            # Family
+            family_conf = reliability.get("Family", {}).get("confidence", 0)
+            family_name = reliability.get("Family", {}).get("name", "Unknown")
+            if family_conf >= 0.40 and family_name != "Unknown":
+                hierarchy_parts.append(f"{family_name} ({family_conf*100:.0f}%)")
+                
+            # Genus
+            genus_conf = reliability.get("Genus", {}).get("confidence", 0)
+            genus_name = reliability.get("Genus", {}).get("name", "Unknown")
+            if genus_conf >= 0.30 and genus_name != "Unknown":
+                hierarchy_parts.append(f"{genus_name} ({genus_conf*100:.0f}%)")
+            else:
+                hierarchy_parts.append("[Novel Genus]")
+                
+            taxonomic_reliability_str = " > ".join(hierarchy_parts)
             
         if isinstance(is_novel, (np.ndarray, list)):
              if isinstance(is_novel, np.ndarray):

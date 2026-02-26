@@ -466,6 +466,10 @@ with tab_monitor:
                     st.warning("No session data available to export.")
             
             if start_btn:
+                # Clear buffer for new stream
+                st.session_state.scan_results_buffer = []
+                st.session_state.novel_clusters = []
+                
                 log_event(f"Mounting File: {file_details['Filename']}")
                 log_event("Loading Local CPU Inference Engine...")
                 log_event("Vectorizing Query Sequence (Local)...")
@@ -572,6 +576,7 @@ with tab_monitor:
                              st.session_state.novel_clusters = clusters
                              if clusters:
                                  log_event(f"SUCCESS: DISCOVERY: {len(clusters)} novel clusters identified.")
+                                 st.success(f"Cluster Summary: {len(clusters)} Novel Taxonomic Units (NTUs) discovered from {len(st.session_state.scan_results_buffer)} sequences.")
                                  
                                  # Tag the buffer items with their cluster entity for the UI
                                  for cluster in clusters:
@@ -582,6 +587,8 @@ with tab_monitor:
                                              if hit.get('query_id') == mid:
                                                  hit['cluster_id'] = cid
                                                  hit['cluster_entity'] = cluster
+                             else:
+                                 st.info(f"Cluster Summary: No novel clusters identified from {len(st.session_state.scan_results_buffer)} sequences.")
                          except Exception as de:
                              logger.error(f"Discovery Failed: {de}")
 
@@ -686,7 +693,7 @@ with tab_monitor:
                                 <div>
                                     <span style="font-size: 0.8em; color: #94A3B8;">QUERY: {hit.get('query_id', 'Unknown')}</span>
                                     <h3 class="{text_class}" style="margin: 5px 0;">{card_icon_html} {hit['display_name']}</h3>
-                                    <div class="breadcrumb">{display_breadcrumb}</div>
+                                    <div class="breadcrumb" style="color: #FACC15; font-weight: bold;">{display_breadcrumb}</div>
                                 </div>
                                 <div style="text-align: right;">
                                     <div style="font-size: 1.5em; font-weight: bold; color: {bar_color};">{hit['confidence_pct']}</div>
@@ -777,7 +784,28 @@ with tab_monitor:
 # --- TAB 2: MANIFOLD VISUALIZER ---
 with tab_visualizer:
     st.markdown('<div class="glass-panel">', unsafe_allow_html=True)
-    st.subheader("LATENT SPACE TOPOLOGY")
+    
+    col_viz1, col_viz2 = st.columns([3, 1])
+    with col_viz1:
+        st.subheader("LATENT SPACE TOPOLOGY")
+    with col_viz2:
+        force_recluster = st.button("FORCE RE-CLUSTER", use_container_width=True, icon=":material/hub:")
+        if force_recluster and 'scan_results_buffer' in st.session_state and st.session_state.scan_results_buffer:
+            with st.spinner("Re-clustering Manifold..."):
+                clusters = discovery.analyze_novelty(st.session_state.scan_results_buffer)
+                st.session_state.novel_clusters = clusters
+                if clusters:
+                    for cluster in clusters:
+                        cid = cluster['otu_id']
+                        for member in cluster.get('members', []):
+                            mid = member['id']
+                            for hit in st.session_state.scan_results_buffer:
+                                if hit.get('query_id') == mid:
+                                    hit['cluster_id'] = cid
+                                    hit['cluster_entity'] = cluster
+                    st.success(f"Re-clustered: {len(clusters)} NTUs found.")
+                else:
+                    st.info("Re-clustered: No NTUs found.")
     
     if 'viz_context' in st.session_state and st.session_state.viz_context:
         ctx = st.session_state.viz_context

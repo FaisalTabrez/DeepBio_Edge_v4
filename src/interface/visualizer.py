@@ -59,41 +59,65 @@ class ManifoldVisualizer:
                      # Load full table to pandas for stratified sampling
                      df = table.to_pandas()
                      
+                     # @Data-Ops: Column Name Normalization
+                     df.columns = [c.lower() for c in df.columns]
+                     
                      total_points = len(df)
                      sample_size = min(5000, total_points)
                      
                      if total_points > 0:
-                         # Stratified sample of 5000 rows
+                         # @Data-Ops: Stratification Fail-Safe
                          stratify_col = None
-                         for col in ['Phylum', 'Class', 'Order', 'Family', 'lineage']:
+                         for col in ['phylum', 'class', 'order', 'family', 'lineage']:
                              if col in df.columns:
                                  stratify_col = col
                                  break
                          
                          if stratify_col:
+                             # Fill NaNs to prevent groupby failure
+                             if df[stratify_col].isnull().any():
+                                 df[stratify_col] = df[stratify_col].fillna('Unclassified')
+                                 
                              # Group by the stratify column and sample proportionally
-                             df = df.groupby(stratify_col, group_keys=False).apply(
+                             df_sample = df.groupby(stratify_col, group_keys=False).apply(
                                  lambda x: x.sample(n=max(1, int(len(x) * sample_size / total_points)), random_state=42)
                              )
                              # Ensure exactly 5000 if we overshot
-                             if len(df) > sample_size:
-                                 df = df.sample(n=sample_size, random_state=42)
+                             if len(df_sample) > sample_size:
+                                 df_sample = df_sample.sample(n=sample_size, random_state=42)
+                                 
+                             # Fallback if sampling failed
+                             if df_sample.empty:
+                                 df_sample = df.head(sample_size)
+                             df = df_sample
                          else:
                              df = df.sample(n=sample_size, random_state=42)
                          
                      self.background_cloud_df = df
-                     print(f"[VISUALIZER] High-Density Atlas Loaded: {sample_size}/{total_points} points sampled.")
-                     logger.info(f"Background Cloud Loaded: {sample_size} points")
+                     print(f"[VISUALIZER] High-Density Atlas Loaded: {len(df)}/{total_points} points sampled.")
+                     logger.info(f"Background Cloud Loaded: {len(df)} points")
                      
-                     # @Data-Ops: Data Extraction Fix (The Matrix Conversion)
-                     if 'vector' in df.columns:
-                         df_clean = df.dropna(subset=['vector'])
-                         X = np.stack(df_clean['vector'].values).astype(np.float32)
+                     # @Data-Ops: Vector Validation Logic
+                     if 'vector' not in df.columns:
+                         import streamlit as st
+                         st.error(f'Critical: Vector column missing. Found: {df.columns}')
+                         logger.error(f"Critical: Vector column missing. Found: {df.columns}")
+                         return
                          
+                     # @Data-Ops: Data Extraction Fix (The Matrix Conversion)
+                     df_clean = df.dropna(subset=['vector'])
+                     
+                     # @Data-Ops: Data Type Force
+                     X = np.array(df_clean['vector'].tolist(), dtype=np.float32)
+                     
+                     import streamlit as st
+                     st.write(f'DEBUG: Matrix X shape: {X.shape}')
+                     
+                     if X.shape[0] > 0:
                          if X.shape[1] != 768:
                              raise ValueError(f'Matrix Shape Mismatch: {X.shape}')
                              
-                         # @Data-Ops: PCA Fitting & Projection
+                         # @Data-Ops: Global PCA Fitting
                          self.pca_model = PCA(n_components=3)
                          coords = self.pca_model.fit_transform(X)
                          
@@ -104,8 +128,12 @@ class ManifoldVisualizer:
                          
                          if min_val == 0.0 and max_val == 0.0:
                              logger.critical("[VISUALIZER] CRITICAL ERROR: Vectors in the database are empty (all zeros).")
+                             st.error("CRITICAL ERROR: Vectors in the database are empty (all zeros).")
                              
                          self.background_coords = coords
+                     else:
+                         logger.critical("[VISUALIZER] CRITICAL ERROR: Database Empty or no valid vectors found.")
+                         st.error("CRITICAL ERROR: Database Empty or no valid vectors found.")
                          
         except Exception as e:
              logger.warning(f"Failed to load background cloud: {e}")
@@ -316,11 +344,11 @@ class ManifoldVisualizer:
             
             # @UX-Visionary: Phylum Colors
             phylum_colors = []
-            unique_phyla = list(set([v.get('Phylum', 'Unknown') for v in valid_bg]))
+            unique_phyla = list(set([v.get('phylum', 'Unknown') for v in valid_bg]))
             color_map = {p: self.palette[i % len(self.palette)] for i, p in enumerate(unique_phyla)}
             for i in range(len(bg_coords)):
                 if i < len(valid_bg):
-                    phylum_colors.append(color_map.get(valid_bg[i].get('Phylum', 'Unknown'), '#334155'))
+                    phylum_colors.append(color_map.get(valid_bg[i].get('phylum', 'Unknown'), '#334155'))
                 else:
                     phylum_colors.append('#334155')
             
@@ -379,15 +407,23 @@ class ManifoldVisualizer:
             for i, row in cluster_coords.iterrows():
                 cid = cluster_map.get(i, f"Group {i}")
                 
+                # Find the consensus name from the novel_clusters data if available
+                consensus_name = "Unknown"
+                if novel_clusters:
+                    for nc in novel_clusters:
+                        if nc.get('otu_id') == cid:
+                            consensus_name = nc.get('consensus_name', 'Unknown')
+                            break
+                
                 # Plot Centroid
                 fig.add_trace(go.Scatter3d(
                     x=[row['x']], y=[row['y']], z=[row['z']],
                     mode='markers+text',
                     marker=dict(size=8, color='#FF007A', symbol='diamond-open', line=dict(width=2)),
-                    text=[cid],
+                    text=[f"CANDIDATE NTU: {consensus_name}"],
                     textposition="top center",
                     textfont=dict(color="#FF007A", size=10),
-                    name="Novel Taxonomic Unit (NTU)",
+                    name="Discovered NTU",
                     legendgroup="NTU",
                     showlegend=(i == 0), # Only show once in legend
                     customdata=[cid]
@@ -420,6 +456,7 @@ class ManifoldVisualizer:
                                     x=mem_coords['x'].values, y=mem_coords['y'].values, z=mem_coords['z'].values,
                                     i=simplices[:,0], j=simplices[:,1], k=simplices[:,2],
                                     color='#FF007A', opacity=0.15,
+                                    alphahull=5,
                                     name='Genomic Volume',
                                     legendgroup="NTU",
                                     showlegend=False,

@@ -37,8 +37,9 @@ class DiscoveryEngine:
     """
     def __init__(self, atlas: AtlasManager):
         self.atlas = atlas
-        self.min_cluster_size = 3 # Optimized for small batch "Edge" discovery
-        self.min_samples = 2
+        # @BioArch: Parameter Tuning for 100k Demo
+        self.min_cluster_size = 2 # Hyper-sensitive for small batches
+        self.min_samples = 1
         self.metric = 'euclidean'
         
         if not HAS_HDBSCAN and (DBSCAN is None):
@@ -67,7 +68,7 @@ class DiscoveryEngine:
         Performs a 'Deep Search' (top 50) to find Rank Stability.
         Returns: (Taxon_Name, Distance, Consensus_Rank, Consensus_Name)
         """
-        # top_k=50 for Deep Search
+        # @BioArch: Centroid Anchoring - top_k=50 for Deep Search
         results = self.atlas.query_vector(centroid, top_k=50)
         if not results:
             return "Unknown", 1.0, "Unknown", "Unknown"
@@ -81,10 +82,13 @@ class DiscoveryEngine:
         # High-Level Consensus: Rank Stability
         families = []
         genera = []
+        phyla = []
         for r in results:
             lineage = r.get('lineage', '')
             if lineage:
                 parts = lineage.split(';')
+                if len(parts) >= 2:
+                    phyla.append(parts[1].strip()) # Phylum is usually the second element
                 if len(parts) >= 4:
                     families.append(parts[3].strip())
                 if len(parts) >= 5:
@@ -92,9 +96,16 @@ class DiscoveryEngine:
                     
         family_counts = Counter(families)
         genus_counts = Counter(genera)
+        phylum_counts = Counter(phyla)
         
         consensus_rank = "Unknown"
         consensus_name = "Unknown"
+        
+        if phylum_counts:
+            top_phylum, p_count = phylum_counts.most_common(1)[0]
+            if p_count >= 25: # 50% of 50
+                consensus_rank = "Phylum"
+                consensus_name = top_phylum
         
         if family_counts:
             top_family, f_count = family_counts.most_common(1)[0]
@@ -216,6 +227,10 @@ class DiscoveryEngine:
             else:
                 otu_id = f"DeepBio-NTU-Unknown-{greek_alphabet[cluster_idx % len(greek_alphabet)]}"
             cluster_idx += 1
+            
+            # @BioArch: Terminal Log for Centroid Anchoring
+            print(f"[DISCOVERY] Cluster {otu_id} anchored to Phylum: {consensus_name} via centroid consensus.")
+            logger.info(f"[DISCOVERY] Cluster {otu_id} anchored to Phylum: {consensus_name} via centroid consensus.")
             
             # Divergence Metric
             if avg_member_distance > 0.25:
