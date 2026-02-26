@@ -448,14 +448,11 @@ class ManifoldVisualizer:
                         ))
                         
                         # Convex Hull for Genomic Volume
-                        if len(mem_coords) >= 4 and ConvexHull:
+                        if len(mem_coords) >= 4:
                             try:
-                                hull = ConvexHull(mem_coords[['x','y','z']].values)
-                                simplices = hull.simplices
                                 fig.add_trace(go.Mesh3d(
                                     x=mem_coords['x'].values, y=mem_coords['y'].values, z=mem_coords['z'].values,
-                                    i=simplices[:,0], j=simplices[:,1], k=simplices[:,2],
-                                    color='#FF007A', opacity=0.15,
+                                    color='#FF007A', opacity=0.2,
                                     alphahull=5,
                                     name='Genomic Volume',
                                     legendgroup="NTU",

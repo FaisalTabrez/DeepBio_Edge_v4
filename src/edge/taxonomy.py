@@ -445,6 +445,33 @@ class TaxonomyEngine:
 
         # --- TAXONOMIC RELIABILITY FORMATTING ---
         taxonomic_reliability_str = ""
+        hierarchy_str = ""
+        
+        if reliability:
+            # Build the hierarchy string regardless of novelty
+            h_parts = []
+            
+            # Phylum
+            p_name = reliability.get("Phylum", {}).get("name", "Unknown")
+            if p_name != "Unknown": h_parts.append(p_name)
+            
+            # Class
+            c_name = reliability.get("Class", {}).get("name", "Unknown")
+            if c_name != "Unknown": h_parts.append(c_name)
+            
+            # Order
+            o_name = reliability.get("Order", {}).get("name", "Unknown")
+            if o_name != "Unknown": h_parts.append(o_name)
+            
+            # Genus
+            g_name = reliability.get("Genus", {}).get("name", "Unknown")
+            if is_novel:
+                h_parts.append("[PROBABLE GENUS]")
+            elif g_name != "Unknown":
+                h_parts.append(g_name)
+                
+            hierarchy_str = " > ".join(h_parts) if h_parts else "Unknown"
+
         if is_novel and reliability:
             # Hierarchical Consensus Inference
             # 90% Phylum -> Confirmed, 70% Class -> Probable, <30% Species -> NOVEL SPECIES
@@ -507,7 +534,8 @@ class TaxonomyEngine:
             "source_method": source,
             "vector": vector_data,
             "reliability": reliability,
-            "taxonomic_reliability_str": taxonomic_reliability_str
+            "taxonomic_reliability_str": taxonomic_reliability_str,
+            "hierarchy": hierarchy_str
         }
 
     def format_search_results(self, raw_hits: List[Dict], gene_type: str="COI") -> List[Dict]:

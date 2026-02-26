@@ -574,6 +574,7 @@ with tab_monitor:
                          try:
                              clusters = discovery.analyze_novelty(st.session_state.scan_results_buffer)
                              st.session_state.novel_clusters = clusters
+                             st.session_state['ntu_registry'] = clusters
                              if clusters:
                                  log_event(f"SUCCESS: DISCOVERY: {len(clusters)} novel clusters identified.")
                                  st.success(f"Cluster Summary: {len(clusters)} Novel Taxonomic Units (NTUs) discovered from {len(st.session_state.scan_results_buffer)} sequences.")
@@ -591,6 +592,9 @@ with tab_monitor:
                                  st.info(f"Cluster Summary: No novel clusters identified from {len(st.session_state.scan_results_buffer)} sequences.")
                          except Exception as de:
                              logger.error(f"Discovery Failed: {de}")
+
+                    st.session_state['scan_complete'] = True
+                    st.rerun()
 
                 except Exception as e:
                     st.error(f"Stream Error: {e}")
@@ -614,10 +618,14 @@ with tab_monitor:
             if st.session_state.scan_results_buffer and len(st.session_state.scan_results_buffer) > 0:
                 with results_container:
                     rendered_clusters = set()
+                    
+                    # Check if we have clustered data
+                    has_clusters = 'ntu_registry' in st.session_state and st.session_state['ntu_registry']
+                    
                     for hit in st.session_state.scan_results_buffer:
                         cluster_id = hit.get('cluster_id')
                         
-                        if cluster_id:
+                        if has_clusters and cluster_id and cluster_id != -1:
                             if cluster_id in rendered_clusters:
                                 continue # Skip individual cards for clustered items
                             
@@ -685,7 +693,10 @@ with tab_monitor:
                         
                         card_icon_html = "✦" if is_novel else "✓"
                         
-                        display_breadcrumb = hit.get('taxonomic_reliability_str', '') if is_novel and hit.get('taxonomic_reliability_str') else hit['display_lineage'].replace('Unknown', '???')
+                        # Use the new hierarchy string if available, otherwise fallback to taxonomic_reliability_str or display_lineage
+                        display_breadcrumb = hit.get('hierarchy', '')
+                        if not display_breadcrumb or display_breadcrumb == 'Unknown':
+                            display_breadcrumb = hit.get('taxonomic_reliability_str', '') if is_novel and hit.get('taxonomic_reliability_str') else hit['display_lineage'].replace('Unknown', '???')
                         
                         st.markdown(f"""
                         <div class="glass-panel {card_class}" style="padding: 15px; margin-bottom: 15px;">
@@ -720,26 +731,58 @@ with tab_monitor:
             if st.session_state.scan_results_buffer and len(st.session_state.scan_results_buffer) > 0:
                 # Build hierarchy data for Sunburst
                 hierarchy_data = []
+                
+                # Check if we have clustered data
+                has_clusters = 'ntu_registry' in st.session_state and st.session_state['ntu_registry']
+                processed_clusters = set()
+                
                 for hit in st.session_state.scan_results_buffer:
-                    lineage = hit.get('display_lineage', 'Unknown;Unknown;Unknown;Unknown;Unknown')
-                    parts = lineage.split(';')
+                    cluster_id = hit.get('cluster_id')
                     
-                    # Pad or truncate to ensure we have Phylum, Class, Order, Family, Genus
-                    while len(parts) < 5:
-                        parts.append('Unknown')
-                    
-                    phylum = parts[0].strip() if parts[0].strip() else 'Unknown'
-                    class_name = parts[1].strip() if parts[1].strip() else 'Unknown'
-                    order = parts[2].strip() if parts[2].strip() else 'Unknown'
-                    genus = parts[4].strip() if len(parts) > 4 and parts[4].strip() else 'Unknown'
-                    
-                    hierarchy_data.append({
-                        'Phylum': phylum,
-                        'Class': class_name,
-                        'Order': order,
-                        'Genus': genus,
-                        'Count': 1
-                    })
+                    if has_clusters and cluster_id and cluster_id != -1:
+                        if cluster_id in processed_clusters:
+                            continue
+                        processed_clusters.add(cluster_id)
+                        
+                        entity = hit.get('cluster_entity', {})
+                        lineage = entity.get('lineage', 'Unknown;Unknown;Unknown;Unknown;Unknown')
+                        parts = lineage.split(';')
+                        
+                        while len(parts) < 5:
+                            parts.append('Unknown')
+                            
+                        phylum = parts[0].strip() if parts[0].strip() else 'Unknown'
+                        class_name = parts[1].strip() if parts[1].strip() else 'Unknown'
+                        order = parts[2].strip() if parts[2].strip() else 'Unknown'
+                        genus = f"[NOVEL] {entity.get('otu_id', 'NTU')}"
+                        
+                        hierarchy_data.append({
+                            'Phylum': phylum,
+                            'Class': class_name,
+                            'Order': order,
+                            'Genus': genus,
+                            'Count': entity.get('cluster_size', 1)
+                        })
+                    else:
+                        lineage = hit.get('display_lineage', 'Unknown;Unknown;Unknown;Unknown;Unknown')
+                        parts = lineage.split(';')
+                        
+                        # Pad or truncate to ensure we have Phylum, Class, Order, Family, Genus
+                        while len(parts) < 5:
+                            parts.append('Unknown')
+                        
+                        phylum = parts[0].strip() if parts[0].strip() else 'Unknown'
+                        class_name = parts[1].strip() if parts[1].strip() else 'Unknown'
+                        order = parts[2].strip() if parts[2].strip() else 'Unknown'
+                        genus = parts[4].strip() if len(parts) > 4 and parts[4].strip() else 'Unknown'
+                        
+                        hierarchy_data.append({
+                            'Phylum': phylum,
+                            'Class': class_name,
+                            'Order': order,
+                            'Genus': genus,
+                            'Count': 1
+                        })
                 
                 df_comp = pd.DataFrame(hierarchy_data)
                 
@@ -794,6 +837,7 @@ with tab_visualizer:
             with st.spinner("Re-clustering Manifold..."):
                 clusters = discovery.analyze_novelty(st.session_state.scan_results_buffer)
                 st.session_state.novel_clusters = clusters
+                st.session_state['ntu_registry'] = clusters
                 if clusters:
                     for cluster in clusters:
                         cid = cluster['otu_id']
@@ -806,13 +850,14 @@ with tab_visualizer:
                     st.success(f"Re-clustered: {len(clusters)} NTUs found.")
                 else:
                     st.info("Re-clustered: No NTUs found.")
+                st.rerun()
     
     if 'viz_context' in st.session_state and st.session_state.viz_context:
         ctx = st.session_state.viz_context
         
         with st.spinner("Calculating 3D Manifold Projection..."):
             # Prepare clusters
-            n_clusters = st.session_state.get('novel_clusters', [])
+            n_clusters = st.session_state.get('ntu_registry', st.session_state.get('novel_clusters', []))
             
             fig_3d = viz.create_plot(
                 reference_hits=ctx['ref_hits'],
@@ -842,7 +887,7 @@ with tab_discovery:
     
     if 'scan_results_buffer' in st.session_state and st.session_state.scan_results_buffer:
         # 1. Run Discovery Loop
-        novel_entities = discovery.analyze_novelty(st.session_state.scan_results_buffer)
+        novel_entities = st.session_state.get('ntu_registry', discovery.analyze_novelty(st.session_state.scan_results_buffer))
         
         if novel_entities:
             st.success(f"DISCOVERY ALERT: Identified {len(novel_entities)} Potential New Species Groups!")
