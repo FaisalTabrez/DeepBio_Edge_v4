@@ -25,19 +25,19 @@ def get_base_path() -> Path:
     return cwd_path
 
 # 1. Global Path Detection
-BASE_DIR = get_base_path()
+BASE_DIR = Path(os.path.abspath(get_base_path()))
 
 # Define core paths
-DB_PATH = BASE_DIR / 'data' / 'db'
+DB_PATH = Path(os.path.abspath(BASE_DIR / 'data' / 'db'))
 ATLAS_TABLE = 'reference_atlas_v100k'
-WORMS_ORACLE = BASE_DIR / 'data' / 'taxonomy_db' / 'worms_deepsea_ref.csv'
-TAXON_DIR = BASE_DIR / 'data' / 'taxonomy_db'
-LOG_FILE = BASE_DIR / 'logs' / 'session.log'
+WORMS_ORACLE = Path(os.path.abspath(BASE_DIR / 'data' / 'taxonomy_db' / 'worms_deepsea_ref.csv'))
+TAXON_DIR = Path(os.path.abspath(BASE_DIR / 'data' / 'taxonomy_db'))
+LOG_FILE = Path(os.path.abspath(BASE_DIR / 'logs' / 'session.log'))
 
 # Legacy paths for compatibility
-RAW_PATH = BASE_DIR / 'data' / 'raw'
-RESULTS_PATH = BASE_DIR / 'results'
-TAXONKIT_EXE_PATH = BASE_DIR / 'taxonkit.exe'
+RAW_PATH = Path(os.path.abspath(BASE_DIR / 'data' / 'raw'))
+RESULTS_PATH = Path(os.path.abspath(BASE_DIR / 'results'))
+TAXONKIT_EXE_PATH = Path(os.path.abspath(BASE_DIR / 'taxonkit.exe'))
 
 # 2. System States
 # Toggle between real 100k data and mock fallbacks if paths are missing

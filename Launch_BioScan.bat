@@ -46,6 +46,6 @@ echo ========================================================
 timeout /t 2 >nul
 
 :: 4. Launch Streamlit
-streamlit run app.py --server.headless true --theme.base "dark" --theme.primaryColor "#00E5FF"
+streamlit run app.py --server.headless true --server.fileWatcherType none --server.runOnSave false --theme.base "dark" --theme.primaryColor "#00E5FF"
 
 pause

@@ -444,6 +444,11 @@ class TaxonomyEngine:
             status_label = "POTENTIAL NOVEL TAXON"
         elif top_sim < 0.94:
             status_label = "Divergent / Deep Variant"
+            
+        # Force novelty for low confidence hits to ensure they enter the discovery pipeline
+        if top_sim < 0.30:
+            is_novel = True
+            status_label = "DARK TAXON"
 
         if is_novel and reliability:
             family_conf = reliability.get("Family", {}).get("confidence", 0)
