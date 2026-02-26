@@ -640,31 +640,50 @@ with tab_monitor:
                             gauge_color = "#00FF00" if div_val < 0.1 else ("#00E5FF" if div_val < 0.25 else "#FF007A")
                             confidence = 100 - (div_val * 100)
                             
-                            consensus_text = f"AI confirms relationship to {entity.get('consensus_name', 'Unknown')} but suggests {entity.get('consensus_rank', 'Unknown')} status."
-                            if "Modiolidae" in entity.get('consensus_name', ''):
-                                consensus_text = f"AI recognizes these as deep-sea mussels, but the {confidence:.1f}% confidence suggests a novel generic lineage distinct from Bathymodiolus."
+                            consensus_name = entity.get('consensus_name', 'Unknown')
+                            consensus_rank = entity.get('consensus_rank', 'Unknown')
+                            cluster_size = entity.get('cluster_size', 0)
+                            
+                            # Narrative Content
+                            header_text = f"✦ [DISCOVERY] NOVEL TAXONOMIC UNIT: {entity.get('otu_id', 'UNKNOWN')}"
+                            
+                            # Try to build a predicted lineage from the first member's hierarchy
+                            predicted_lineage = "Unknown"
+                            if entity.get('members') and len(entity.get('members')) > 0:
+                                first_member_id = entity['members'][0]['id']
+                                for h in st.session_state.scan_results_buffer:
+                                    if h.get('query_id') == first_member_id:
+                                        predicted_lineage = h.get('hierarchy', 'Unknown')
+                                        break
+                            
+                            if predicted_lineage == "Unknown":
+                                predicted_lineage = f"Predicted Lineage: {consensus_name} > [Divergent Genus]"
+                            else:
+                                predicted_lineage = f"Predicted Lineage: {predicted_lineage}"
+                                
+                            scientific_note = f"Cluster analysis of {cluster_size} sequences suggests a novel lineage within the {consensus_name} complex. Semantic distance from reference atlas: {(div_val * 100):.1f}%."
                                 
                             st.markdown(f"""
                             <div class="glass-panel discovery-card-novel" style="padding: 15px; margin-bottom: 15px; border: 2px solid #FF007A; box-shadow: 0 0 15px rgba(255, 0, 122, 0.5);">
                                 <div style="display: flex; justify-content: space-between; align-items: start;">
                                     <div>
                                         <span style="font-size: 0.8em; color: #94A3B8;">NTU DISCOVERY</span>
-                                        <h3 class="neon-text-pink" style="margin: 5px 0; color: #FF007A; text-shadow: 0 0 5px #FF007A;">✦ [{entity.get('otu_id', 'UNKNOWN')}] NOVEL GENUS DETECTED</h3>
-                                        <div class="breadcrumb">Phylogenetic Anchor: {entity.get('consensus_name', 'Unknown')} (Consensus from 50 neighbors)</div>
+                                        <h3 class="neon-text-pink" style="margin: 5px 0; color: #FF007A; text-shadow: 0 0 5px #FF007A;">{header_text}</h3>
+                                        <div class="breadcrumb" style="color: #FACC15; font-weight: bold;">{predicted_lineage}</div>
                                     </div>
                                     <div style="text-align: right;">
                                         <div style="font-size: 1.5em; font-weight: bold; color: #FF007A;">{confidence:.1f}%</div>
-                                        <div style="font-size: 0.7em; color: #64748B;">MEAN CONFIDENCE</div>
+                                        <div style="font-size: 0.7em; color: #64748B;">PHYLOGENETIC STABILITY</div>
                                     </div>
                                 </div>
                                 <div style="margin-top: 10px; background: #0F172A; height: 6px; border-radius: 3px; overflow: hidden;">
                                     <div style="width: {confidence}%; background: #FF007A; height: 100%; box-shadow: 0 0 10px #FF007A;"></div>
                                 </div>
                                 <div style="margin-top: 8px; font-size: 0.85em; color: #CBD5E1;">
-                                    POPULATION: <b>{entity.get('cluster_size', 0)} sequences</b> forming a stable genomic cluster
+                                    POPULATION: <b>{cluster_size} sequences</b> forming a stable genomic cluster
                                 </div>
                                 <div style="margin-top: 4px; font-size: 0.75em; color: #94A3B8; font-style: italic;">
-                                    {consensus_text}
+                                    {scientific_note}
                                 </div>
                             </div>
                             """, unsafe_allow_html=True)

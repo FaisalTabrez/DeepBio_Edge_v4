@@ -452,8 +452,9 @@ class ManifoldVisualizer:
                             try:
                                 fig.add_trace(go.Mesh3d(
                                     x=mem_coords['x'].values, y=mem_coords['y'].values, z=mem_coords['z'].values,
-                                    color='#FF007A', opacity=0.2,
-                                    alphahull=5,
+                                    color='#FF007A', opacity=0.15,
+                                    alphahull=7,
+                                    lighting=dict(ambient=0.5, diffuse=0.8),
                                     name='Discovery Cluster',
                                     legendgroup="NTU",
                                     showlegend=True if i == 0 else False, # Show in legend once
@@ -505,7 +506,7 @@ class ManifoldVisualizer:
             ))
 
         # Layout Styling - Scientific / Lab
-        fig.update_layout(
+        layout_args = dict(
             scene=dict(
                 xaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title='', autorange=True),
                 yaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title='', autorange=True),
@@ -524,5 +525,18 @@ class ManifoldVisualizer:
                 borderwidth=1
             )
         )
+        
+        # Camera Focus: Center on the first novel cluster if present
+        if not cluster_coords.empty:
+            centroid = cluster_coords.iloc[0]
+            # Ensure scene exists in layout_args
+            if 'scene' not in layout_args:
+                layout_args['scene'] = {}
+            layout_args['scene']['camera'] = dict(
+                center=dict(x=float(centroid['x']), y=float(centroid['y']), z=float(centroid['z'])),
+                eye=dict(x=float(centroid['x']) + 1.5, y=float(centroid['y']) + 1.5, z=float(centroid['z']) + 1.5)
+            )
+            
+        fig.update_layout(**layout_args)
         
         return fig

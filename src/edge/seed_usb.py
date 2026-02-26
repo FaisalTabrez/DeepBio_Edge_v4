@@ -15,7 +15,7 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(project_root))
 
-from src.edge.config_init import DB_PATH, RAW_PATH, LOG_FILE, initialize_folders
+from configs.config import DB_PATH, RAW_PATH, LOG_FILE, initialize_folders
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(name)s] - %(levelname)s - %(message)s")

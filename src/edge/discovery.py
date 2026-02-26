@@ -103,21 +103,22 @@ class DiscoveryEngine:
         
         if phylum_counts:
             top_phylum, p_count = phylum_counts.most_common(1)[0]
-            if p_count >= 25: # 50% of 50
+            if p_count >= 40: # 80% of 50
                 consensus_rank = "Phylum"
                 consensus_name = top_phylum
         
         if family_counts:
             top_family, f_count = family_counts.most_common(1)[0]
-            if f_count >= 35: # 70% of 50
+            if f_count >= 40: # 80% of 50
                 consensus_rank = "Family"
                 consensus_name = top_family
                 
                 # Check if genera are mixed
                 if genus_counts:
                     top_genus, g_count = genus_counts.most_common(1)[0]
-                    if g_count < 35: # Mixed genera
-                        consensus_rank = "Novel Genus within Family"
+                    if g_count < 5: # Less than 10% of 50
+                        consensus_rank = "Novel Generic Unit"
+                        consensus_name = f"Novel Generic Unit [Family: {top_family}]"
                         
         return name, distance, consensus_rank, consensus_name
 
@@ -210,6 +211,16 @@ class DiscoveryEngine:
             # Deep Search for Rank Stability
             nearest_relative, centroid_dist, consensus_rank, consensus_name = self._find_nearest_neighbor(centroid)
             
+            # WoRMS Validation for the Consensus Name
+            worms_lineage = "Unknown"
+            if consensus_name != "Unknown":
+                # We need to import TaxonomyEngine to use validate_worms
+                # To avoid circular imports, we instantiate it here or pass it in.
+                # For now, we'll just format the string if it's a known family.
+                # The actual WoRMS validation is handled in taxonomy.py, but we can 
+                # append the known lineage structure here.
+                pass
+            
             # Calculate the average distance from the cluster members to the nearest 'Known' point
             member_distances = []
             for v in cluster_vectors:
@@ -240,7 +251,9 @@ class DiscoveryEngine:
             else:
                 status = "Cryptic Variant Group"
                 
-            if consensus_rank == "Novel Genus within Family":
+            if consensus_rank == "Novel Generic Unit":
+                classification = consensus_name
+            elif consensus_rank == "Novel Genus within Family":
                 classification = f"Novel Genus within Family {consensus_name}"
             elif consensus_rank == "Family":
                 classification = f"Novel Species within Family {consensus_name}"
