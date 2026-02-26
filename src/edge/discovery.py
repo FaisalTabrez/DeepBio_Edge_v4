@@ -232,11 +232,11 @@ class DiscoveryEngine:
             avg_member_distance = float(np.mean(member_distances)) if member_distances else 1.0
             
             # Generate Provisional ID
-            # e.g. DeepBio-NTU-Modiolidae-Alpha
+            # e.g. DeepBio-NTU-Modiolidae-001
             if consensus_name != "Unknown":
-                otu_id = f"DeepBio-NTU-{consensus_name}-{greek_alphabet[cluster_idx % len(greek_alphabet)]}"
+                otu_id = f"DeepBio-NTU-{consensus_name}-{cluster_idx + 1:03d}"
             else:
-                otu_id = f"DeepBio-NTU-Unknown-{greek_alphabet[cluster_idx % len(greek_alphabet)]}"
+                otu_id = f"DeepBio-NTU-Unknown-{cluster_idx + 1:03d}"
             cluster_idx += 1
             
             # @BioArch: Terminal Log for Centroid Anchoring

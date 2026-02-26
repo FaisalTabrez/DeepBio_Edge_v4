@@ -31,488 +31,195 @@ class ManifoldVisualizer:
             "#4169E1", # Royal Blue
             "#00BFFF"  # Deep Sky Blue
         ]
-        
-        # @UX-Visionary: Pre-fetch background cloud logic
-        self.background_cloud_df = None
-        self.pca_model = None
-        self.background_coords = None
 
-    def load_background_cloud(self, atlas_manager):
+    def get_neighborhood_manifold(self, query_vector: np.ndarray, query_id: str, atlas_manager: Any, top_k: int = 500) -> Dict[str, Any]:
         """
-        Fetches a random sample of 5000 vectors from the real LanceDB table
-        to serve as the 'Universe' background for the PCA plot.
-        """
-        if self.background_cloud_df is not None:
-             return # Already loaded
-             
-        try:
-             if atlas_manager and atlas_manager.db:
-                 # Explicitly query the reference_atlas_v100k table
-                 table_name = "reference_atlas_v100k"
-                 try:
-                     table = atlas_manager.db.open_table(table_name)
-                 except Exception:
-                     table = atlas_manager.table # Fallback
-                     
-                 if table:
-                     logger.info(f"Loading Background Atlas Cloud from {table.name}...")
-                     # Load full table to pandas for stratified sampling
-                     df = table.to_pandas()
-                     
-                     # @Data-Ops: Column Name Normalization
-                     df.columns = [c.lower() for c in df.columns]
-                     
-                     total_points = len(df)
-                     sample_size = min(5000, total_points)
-                     
-                     if total_points > 0:
-                         # @Data-Ops: Stratification Fail-Safe
-                         stratify_col = None
-                         for col in ['phylum', 'class', 'order', 'family', 'lineage']:
-                             if col in df.columns:
-                                 stratify_col = col
-                                 break
-                         
-                         if stratify_col:
-                             # Fill NaNs to prevent groupby failure
-                             if df[stratify_col].isnull().any():
-                                 df[stratify_col] = df[stratify_col].fillna('Unclassified')
-                                 
-                             # Group by the stratify column and sample proportionally
-                             df_sample = df.groupby(stratify_col, group_keys=False).apply(
-                                 lambda x: x.sample(n=max(1, int(len(x) * sample_size / total_points)), random_state=42)
-                             )
-                             # Ensure exactly 5000 if we overshot
-                             if len(df_sample) > sample_size:
-                                 df_sample = df_sample.sample(n=sample_size, random_state=42)
-                                 
-                             # Fallback if sampling failed
-                             if df_sample.empty:
-                                 df_sample = df.head(sample_size)
-                             df = df_sample
-                         else:
-                             df = df.sample(n=sample_size, random_state=42)
-                         
-                     self.background_cloud_df = df
-                     print(f"[VISUALIZER] High-Density Atlas Loaded: {len(df)}/{total_points} points sampled.")
-                     logger.info(f"Background Cloud Loaded: {len(df)} points")
-                     
-                     # @Data-Ops: Vector Validation Logic
-                     if 'vector' not in df.columns:
-                         import streamlit as st
-                         st.error(f'Critical: Vector column missing. Found: {df.columns}')
-                         logger.error(f"Critical: Vector column missing. Found: {df.columns}")
-                         return
-                         
-                     # @Data-Ops: Data Extraction Fix (The Matrix Conversion)
-                     df_clean = df.dropna(subset=['vector'])
-                     
-                     # @Data-Ops: Data Type Force
-                     X = np.array(df_clean['vector'].tolist(), dtype=np.float32)
-                     
-                     import streamlit as st
-                     st.write(f'DEBUG: Matrix X shape: {X.shape}')
-                     
-                     if X.shape[0] > 0:
-                         if X.shape[1] != 768:
-                             raise ValueError(f'Matrix Shape Mismatch: {X.shape}')
-                             
-                         # @Data-Ops: Global PCA Fitting
-                         self.pca_model = PCA(n_components=3)
-                         coords = self.pca_model.fit_transform(X)
-                         
-                         # Sanity Check
-                         min_val = coords[:, 0].min()
-                         max_val = coords[:, 0].max()
-                         logger.info(f"[VISUALIZER] Coordinate Bounds: X({min_val}:{max_val})")
-                         
-                         if min_val == 0.0 and max_val == 0.0:
-                             logger.critical("[VISUALIZER] CRITICAL ERROR: Vectors in the database are empty (all zeros).")
-                             st.error("CRITICAL ERROR: Vectors in the database are empty (all zeros).")
-                             
-                         self.background_coords = coords
-                     else:
-                         logger.critical("[VISUALIZER] CRITICAL ERROR: Database Empty or no valid vectors found.")
-                         st.error("CRITICAL ERROR: Database Empty or no valid vectors found.")
-                         
-        except Exception as e:
-             logger.warning(f"Failed to load background cloud: {e}")
-
-    def perform_pca_reduction(self, 
-                            ref_vectors: np.ndarray, 
-                            query_vector: np.ndarray,
-                            background_vectors: Optional[np.ndarray] = None,
-                            cluster_vectors: Optional[np.ndarray] = None,
-                            cluster_member_vectors: Optional[np.ndarray] = None) -> pd.DataFrame:
-        """
-        Reduces Dimensions from N -> 3 using PCA.
-        Fits on Background Cloud + Hits to establish the 'Manifold'.
-        Projects: Query AND Novel Clusters into this stable biological space.
+        Fetches the top_k nearest neighbors for a query and fits a localized PCA model.
+        Returns the projected coordinates and metadata.
         """
         try:
-            # @Data-Ops: Use pre-fitted PCA model if available
-            if hasattr(self, 'pca_model') and self.pca_model is not None:
-                pca = self.pca_model
-                logger.info("[VISUALIZER] Using pre-fitted PCA model from background cloud.")
+            if not atlas_manager or not atlas_manager.db:
+                logger.error("Atlas Manager not available for neighborhood fetch.")
+                return {}
+
+            table_name = "reference_atlas_v100k"
+            try:
+                table = atlas_manager.db.open_table(table_name)
+            except Exception:
+                table = atlas_manager.table # Fallback
+                
+            if not table:
+                logger.error("LanceDB table not found.")
+                return {}
+
+            # 1. Fetch Neighborhood
+            # Ensure query_vector is a list of floats for LanceDB
+            if isinstance(query_vector, np.ndarray):
+                query_list = query_vector.flatten().tolist()
             else:
-                pca = PCA(n_components=3)
+                query_list = query_vector
+
+            results = table.search(query_list).limit(top_k).to_pandas()
+            
+            if results.empty:
+                logger.warning(f"No neighbors found for query {query_id}")
+                return {}
+
+            # Normalize columns
+            results.columns = [c.lower() for c in results.columns]
+            
+            # Extract vectors and metadata
+            neighbor_vectors = np.array(results['vector'].tolist(), dtype=np.float32)
+            
+            # 2. Localized PCA
+            # Combine query and neighbors for PCA fit
+            query_np = np.array(query_list, dtype=np.float32).reshape(1, -1)
+            fit_data = np.vstack([query_np, neighbor_vectors])
+            
+            pca = PCA(n_components=3)
+            coords = pca.fit_transform(fit_data)
+            
+            # 3. Data Structuring
+            query_coords = coords[0]
+            neighbor_coords = coords[1:]
+            
+            # Build metadata list
+            neighbors_meta = []
+            for i, row in results.iterrows():
+                neighbors_meta.append({
+                    'scientific_name': row.get('scientific_name', 'Unknown'),
+                    'phylum': row.get('phylum', 'Unknown'),
+                    'x': float(neighbor_coords[i, 0]),
+                    'y': float(neighbor_coords[i, 1]),
+                    'z': float(neighbor_coords[i, 2]),
+                    'distance': float(row.get('_distance', 0.0))
+                })
                 
-                # Prepare Training Set for PCA Fit
-                # Includes Background + References to define axes
-                # @Embedder-ML: Use the 100k atlas (background) as the baseline 'Global Biodiversity Coordinate System'
-                if background_vectors is not None and len(background_vectors) > 10:
-                    fit_data = background_vectors
-                elif len(ref_vectors) > 0:
-                    fit_data = ref_vectors
-                else:
-                     # Edge case: No data to fit (fresh DB)
-                     # Fit on query + noise for stability
-                     fit_data = np.vstack([query_vector, query_vector + np.random.normal(0, 0.01, query_vector.shape)])
-                    
-                # Fit PCA
-                if len(fit_data) < 3:
-                    return pd.DataFrame()
-    
-                pca.fit(fit_data)
-                logger.info("[VISUALIZER] PCA Fit successful on 768-dim manifold. Projection active.")
+            manifold_data = {
+                'query_id': query_id,
+                'query_coords': {
+                    'x': float(query_coords[0]),
+                    'y': float(query_coords[1]),
+                    'z': float(query_coords[2])
+                },
+                'neighbors': neighbors_meta,
+                'explained_variance': pca.explained_variance_ratio_.tolist()
+            }
             
-            # --- TRANSFORM ---
-            df_bg = pd.DataFrame()
-            if background_vectors is not None and len(background_vectors) > 0:
-                 # @Data-Ops: Use pre-computed background coordinates if available
-                 if hasattr(self, 'background_coords') and self.background_coords is not None:
-                     pca_bg = self.background_coords
-                 else:
-                     pca_bg = pca.transform(background_vectors)
-                 # @Embedder-ML: Projection Defense
-                 pca_bg = np.nan_to_num(pca_bg, nan=0.0, posinf=0.0, neginf=0.0)
-                 df_bg = pd.DataFrame(pca_bg, columns=['x', 'y', 'z'])
-                 df_bg['type'] = 'background'
+            # Store in session state if available
+            import streamlit as st
+            if 'manifold_cache' not in st.session_state:
+                st.session_state['manifold_cache'] = {}
+            st.session_state['manifold_cache'][query_id] = manifold_data
             
-            df_ref = pd.DataFrame()
-            if len(ref_vectors) > 0:
-                pca_ref = pca.transform(ref_vectors)
-                # @Embedder-ML: Projection Defense
-                pca_ref = np.nan_to_num(pca_ref, nan=0.0, posinf=0.0, neginf=0.0)
-                df_ref = pd.DataFrame(pca_ref, columns=['x', 'y', 'z'])
-                df_ref['type'] = 'reference'
-            
-            pca_query = pca.transform(query_vector.reshape(1, -1))
-            # @Embedder-ML: Projection Defense
-            pca_query = np.nan_to_num(pca_query, nan=0.0, posinf=0.0, neginf=0.0)
-            df_query = pd.DataFrame(pca_query, columns=['x', 'y', 'z'])
-            df_query['type'] = 'query'
-            
-            # Transform Clusters (NTUs)
-            df_clusters = pd.DataFrame()
-            if cluster_vectors is not None and len(cluster_vectors) > 0:
-                 pca_clus = pca.transform(cluster_vectors)
-                 # @Embedder-ML: Projection Defense
-                 pca_clus = np.nan_to_num(pca_clus, nan=0.0, posinf=0.0, neginf=0.0)
-                 df_clusters = pd.DataFrame(pca_clus, columns=['x', 'y', 'z'])
-                 df_clusters['type'] = 'cluster_point'
-
-            df_cluster_members = pd.DataFrame()
-            if cluster_member_vectors is not None and len(cluster_member_vectors) > 0:
-                 pca_clus_mem = pca.transform(cluster_member_vectors)
-                 # @Embedder-ML: Projection Defense
-                 pca_clus_mem = np.nan_to_num(pca_clus_mem, nan=0.0, posinf=0.0, neginf=0.0)
-                 df_cluster_members = pd.DataFrame(pca_clus_mem, columns=['x', 'y', 'z'])
-                 df_cluster_members['type'] = 'cluster_member'
-
-            return pd.concat([df_bg, df_ref, df_query, df_clusters, df_cluster_members], ignore_index=True)
+            logger.info(f"Localized Manifold generated for {query_id} with {len(neighbors_meta)} neighbors.")
+            return manifold_data
             
         except Exception as e:
-            logger.error(f"PCA Reduction Failed: {e}")
-            return pd.DataFrame()
+            logger.error(f"Failed to generate neighborhood manifold: {e}")
+            return {}
 
-    def create_plot(self, 
-                   reference_hits: List[Dict], 
-                   query_vector: np.ndarray, 
-                   query_display_name: str,
-                   is_novel: bool,
-                   atlas_manager: Any,
-                   novel_clusters: Optional[List[Dict]] = None) -> go.Figure:
+    def create_localized_plot(self, query_id: str) -> go.Figure:
         """
-        Generates the Plotly 3D Figure using Real Data.
+        Renders the High-Resolution Zoom manifold for a specific query.
         """
-        # 1. Ensure Background
-        if self.background_cloud_df is None:
-            self.load_background_cloud(atlas_manager)
-            
-        # 2. Extract Vectors from Hits
-        vectors = []
-        valid_refs = []
+        import streamlit as st
         
-        for hit in reference_hits:
-            v = hit.get('vector')
-            if v is None: v = hit.get('vectors') # Try fallback
-            
-            if v is not None:
-                if isinstance(v, list):
-                    vectors.append(np.array(v, dtype=np.float32))
-                else:
-                    vectors.append(v)
-                valid_refs.append(hit)
-                
-        if vectors:
-            ref_vecs_np = np.vstack(vectors)
-        else:
-            ref_vecs_np = np.empty((0, 768)) # Shape guess
-            
-        # 3. Get Background Vectors
-        bg_vecs_np = None
-        valid_bg = []
-        if self.background_cloud_df is not None and not self.background_cloud_df.empty:
-            if 'vector' in self.background_cloud_df.columns:
-                 # Clean nans if any
-                 bg_clean = self.background_cloud_df.dropna(subset=['vector'])
-                 # @Embedder-ML: Vector Unpacking Fix
-                 # Ensure the 'vector' column is correctly converted into a 2D NumPy array of shape (5000, 768)
-                 bg_list = bg_clean['vector'].values
-                 if len(bg_list) > 0:
-                    bg_vecs_np = np.stack(bg_list)
-                    valid_bg = bg_clean.to_dict('records')
-
-        # 4. Extract Cluster Vectors
-        cluster_vectors = None
-        cluster_map = {} 
-        cluster_member_vectors = None
-        cluster_member_map = {}
-        
-        if novel_clusters:
-            temp_vecs = []
-            temp_member_vecs = []
-            for i, cluster in enumerate(novel_clusters):
-                cid = cluster.get('otu_id', 'Unknown')
-                if 'avg_vector' in cluster:
-                    v = cluster['avg_vector']
-                    if isinstance(v, list): v = np.array(v)
-                    temp_vecs.append(v)
-                    cluster_map[len(temp_vecs)-1] = cid
-                
-                if 'member_vectors' in cluster:
-                    m_vecs = cluster['member_vectors']
-                    for mv in m_vecs:
-                        if isinstance(mv, list): mv = np.array(mv)
-                        temp_member_vecs.append(mv)
-                        cluster_member_map[len(temp_member_vecs)-1] = cid
-                        
-            if temp_vecs:
-                cluster_vectors = np.vstack(temp_vecs)
-            if temp_member_vecs:
-                cluster_member_vectors = np.vstack(temp_member_vecs)
-
-        # 5. Run PCA - Dimension Reduction
-        # Ensure query is numpy
-        if isinstance(query_vector, list):
-            query_vector = np.array(query_vector)
-            
-        combined_coords = self.perform_pca_reduction(
-            ref_vectors=ref_vecs_np,
-            query_vector=query_vector,
-            background_vectors=bg_vecs_np,
-            cluster_vectors=cluster_vectors,
-            cluster_member_vectors=cluster_member_vectors
-        )
-        
-        if combined_coords.empty:
+        if 'manifold_cache' not in st.session_state or query_id not in st.session_state['manifold_cache']:
             return go.Figure()
-
-        # 6. Split Coords back to logical groups
-        bg_coords = combined_coords[combined_coords['type'] == 'background'].reset_index(drop=True)
-        ref_coords = combined_coords[combined_coords['type'] == 'reference'].reset_index(drop=True)
-        query_coords = combined_coords[combined_coords['type'] == 'query'].iloc[0]
-        cluster_coords = pd.DataFrame()
-        if 'cluster_point' in combined_coords['type'].values:
-             cluster_coords = combined_coords[combined_coords['type'] == 'cluster_point'].reset_index(drop=True)
-        cluster_member_coords = pd.DataFrame()
-        if 'cluster_member' in combined_coords['type'].values:
-             cluster_member_coords = combined_coords[combined_coords['type'] == 'cluster_member'].reset_index(drop=True)
-
-        # --- PLOTLY CONSTRUCTION ---
+            
+        data = st.session_state['manifold_cache'][query_id]
+        
+        q_coords = data['query_coords']
+        neighbors = data['neighbors']
+        
+        # Determine if novel based on session state context
+        is_novel = st.session_state.get('active_viz_novel', False)
+        query_name = st.session_state.get('active_viz_name', query_id)
+        
         fig = go.Figure()
-
-        # A. Background Cloud (The Universe) - Dark & Subtle
-        if not bg_coords.empty:
-            # Create hover text
-            hover_bg = [
-                f"Record: {valid_bg[i].get('scientific_name', 'Unknown')}" 
-                if i < len(valid_bg) else "Record: Unknown"
-                for i in range(len(bg_coords))
-            ]
+        
+        # 1. Plot 500 Neighbors (Neon Blue)
+        if neighbors:
+            df_n = pd.DataFrame(neighbors)
             
-            # @UX-Visionary: Phylum Colors
-            phylum_colors = []
-            unique_phyla = list(set([v.get('phylum', 'Unknown') for v in valid_bg]))
-            color_map = {p: self.palette[i % len(self.palette)] for i, p in enumerate(unique_phyla)}
-            for i in range(len(bg_coords)):
-                if i < len(valid_bg):
-                    phylum_colors.append(color_map.get(valid_bg[i].get('phylum', 'Unknown'), '#334155'))
-                else:
-                    phylum_colors.append('#334155')
-            
-            fig.add_trace(go.Scatter3d(
-                x=bg_coords['x'], y=bg_coords['y'], z=bg_coords['z'],
-                mode='markers',
-                marker=dict(size=2, opacity=0.5, color=phylum_colors),
-                hoverinfo='text',
-                text=hover_bg,
-                name='Atlas Background'
-            ))
-
-        # B. Reference Context (The Neighbors) - Cyan #00E5FF
-        if not ref_coords.empty:
-            hover_ref = [
-                f"<b>{h.get('scientific_name', 'Unknown')}</b><br>Sim: {h.get('similarity', 0):.2f}" 
-                for h in valid_refs
+            hover_text = [
+                f"<b>{row['scientific_name']}</b><br>Phylum: {row['phylum']}<br>Dist: {row['distance']:.3f}"
+                for _, row in df_n.iterrows()
             ]
             
             fig.add_trace(go.Scatter3d(
-                x=ref_coords['x'], y=ref_coords['y'], z=ref_coords['z'],
+                x=df_n['x'], y=df_n['y'], z=df_n['z'],
                 mode='markers',
-                marker=dict(size=6, color='#00E5FF', opacity=0.9, line=dict(width=0.5, color='white')),
+                marker=dict(
+                    size=4, 
+                    color='#00E5FF', # Neon Blue
+                    opacity=0.6,
+                    line=dict(width=0.5, color='rgba(255,255,255,0.2)')
+                ),
                 hoverinfo='text',
-                text=hover_ref,
-                name='Genomic Neighborhood'
+                text=hover_text,
+                name='Local Neighborhood (500)'
             ))
-
-            # Optional: Convex Hull if enough points
-            if len(ref_coords) >= 4 and ConvexHull:
+            
+            # 2. Identity Volume (Mesh3d around top 10)
+            if len(df_n) >= 10 and ConvexHull:
+                top_10 = df_n.nsmallest(10, 'distance')
+                
+                # Include query in the hull
+                hull_pts = np.vstack([
+                    top_10[['x', 'y', 'z']].values,
+                    [q_coords['x'], q_coords['y'], q_coords['z']]
+                ])
+                
                 try:
-                    hull = ConvexHull(ref_coords[['x','y','z']].values)
-                    # For mesh3d, we need to extract vertex indices
-                    # But simpler way for ConvexHull is to just plot vertices, 
-                    # Mesh3d needs i,j,k indices which ConvexHull.simplices provides
-                    
-                    x_hull = ref_coords['x'].values
-                    y_hull = ref_coords['y'].values
-                    z_hull = ref_coords['z'].values
-                    
+                    hull = ConvexHull(hull_pts)
                     simplices = hull.simplices
                     
                     fig.add_trace(go.Mesh3d(
-                        x=x_hull, y=y_hull, z=z_hull,
-                        i=simplices[:,0], j=simplices[:,1], k=simplices[:,2],
-                        color='#00E5FF', opacity=0.1,
-                        name='Phylogenetic Envelope',
-                        showlegend=False,
+                        x=hull_pts[:, 0], y=hull_pts[:, 1], z=hull_pts[:, 2],
+                        i=simplices[:, 0], j=simplices[:, 1], k=simplices[:, 2],
+                        color='#00FF7F' if not is_novel else '#FF007A',
+                        opacity=0.15,
+                        alphahull=5,
+                        name='Identity Volume',
                         hoverinfo='skip'
                     ))
                 except Exception as e:
-                    pass
+                    logger.warning(f"Could not draw Identity Volume: {e}")
 
-        # C. Novel Clusters (NTUs) - Neon Pink #FF007A
-        if not cluster_coords.empty:
-            for i, row in cluster_coords.iterrows():
-                cid = cluster_map.get(i, f"Group {i}")
-                
-                # Find the consensus name from the novel_clusters data if available
-                consensus_name = "Unknown"
-                if novel_clusters:
-                    for nc in novel_clusters:
-                        if nc.get('otu_id') == cid:
-                            consensus_name = nc.get('consensus_name', 'Unknown')
-                            break
-                
-                # Plot Centroid
-                fig.add_trace(go.Scatter3d(
-                    x=[row['x']], y=[row['y']], z=[row['z']],
-                    mode='markers+text',
-                    marker=dict(size=8, color='#FF007A', symbol='diamond-open', line=dict(width=2)),
-                    text=[f"CANDIDATE NTU: {consensus_name}"],
-                    textposition="top center",
-                    textfont=dict(color="#FF007A", size=10),
-                    name="Discovered NTU",
-                    legendgroup="NTU",
-                    showlegend=(i == 0), # Only show once in legend
-                    customdata=[cid]
-                ))
-                
-                # Plot Members
-                if not cluster_member_coords.empty:
-                    member_indices = [idx for idx, c in cluster_member_map.items() if c == cid]
-                    if member_indices:
-                        mem_coords = cluster_member_coords.iloc[member_indices]
-                        
-                        fig.add_trace(go.Scatter3d(
-                            x=mem_coords['x'], y=mem_coords['y'], z=mem_coords['z'],
-                            mode='markers',
-                            marker=dict(size=4, color='#FF007A', opacity=0.8),
-                            name="NTU Members",
-                            legendgroup="NTU",
-                            showlegend=False,
-                            hoverinfo='text',
-                            text=[f"Member of {cid}"] * len(mem_coords),
-                            customdata=[cid] * len(mem_coords)
-                        ))
-                        
-                        # Convex Hull for Genomic Volume
-                        if len(mem_coords) >= 4:
-                            try:
-                                fig.add_trace(go.Mesh3d(
-                                    x=mem_coords['x'].values, y=mem_coords['y'].values, z=mem_coords['z'].values,
-                                    color='#FF007A', opacity=0.15,
-                                    alphahull=7,
-                                    lighting=dict(ambient=0.5, diffuse=0.8),
-                                    name='Discovery Cluster',
-                                    legendgroup="NTU",
-                                    showlegend=True if i == 0 else False, # Show in legend once
-                                    hoverinfo='skip'
-                                ))
-                            except Exception as e:
-                                pass
-
-        # D. The Query - Dynamic Color
-        # Pink if Novel, Green if Known
-        
-        # Defensive check for numpy bool (ambiguity error fix)
-        is_novel_safe = is_novel
-        if isinstance(is_novel, np.ndarray):
-            is_novel_safe = bool(is_novel.item()) if is_novel.size == 1 else is_novel.any()
-        
-        c_q = '#FF007A' if is_novel_safe else '#00FF7F' 
-        s_q = 'diamond' if is_novel_safe else 'circle'
-        status_txt = "NOVEL LINEAGE" if is_novel_safe else "KNOWN SPECIES"
+        # 3. Plot Query
+        c_q = '#FF007A' if is_novel else '#00FF7F' 
+        s_q = 'diamond' if is_novel else 'circle'
+        status_txt = "NOVEL LINEAGE" if is_novel else "KNOWN SPECIES"
         
         fig.add_trace(go.Scatter3d(
-            x=[query_coords['x']], y=[query_coords['y']], z=[query_coords['z']],
+            x=[q_coords['x']], y=[q_coords['y']], z=[q_coords['z']],
             mode='markers',
-            marker=dict(size=15, color=c_q, symbol=s_q, line=dict(width=2, color='white'), opacity=1.0),
+            marker=dict(
+                size=18, 
+                color=c_q, 
+                symbol=s_q, 
+                line=dict(width=3, color='white'), 
+                opacity=1.0
+            ),
             name='Active Sequence',
-            text=[f"<b>QUERY TARGET</b><br>{query_display_name}<br>Status: {status_txt}"],
+            text=[f"<b>QUERY TARGET</b><br>{query_name}<br>Status: {status_txt}"],
             hoverinfo='text'
         ))
-
-        # E. Evolutionary Line (Visual Guide from Query to Nearest Ref)
-        if not ref_coords.empty:
-            # Re-find the closest ref in PCA space (Euclidean)
-            # This is purely visual
-            q_pt = np.array([query_coords['x'], query_coords['y'], query_coords['z']])
-            refs_pts = ref_coords[['x', 'y', 'z']].values
-            
-            dists = np.linalg.norm(refs_pts - q_pt, axis=1)
-            nearest_idx = np.argmin(dists)
-            nearest = ref_coords.iloc[nearest_idx]
-
-            fig.add_trace(go.Scatter3d(
-                x=[query_coords['x'], nearest['x']],
-                y=[query_coords['y'], nearest['y']],
-                z=[query_coords['z'], nearest['z']],
-                mode='lines',
-                line=dict(color='white', width=2, dash='dot'),
-                hoverinfo='skip',
-                showlegend=False
-            ))
-
-        # Layout Styling - Scientific / Lab
-        layout_args = dict(
+        
+        # Layout Styling
+        layout_args: Dict[str, Any] = dict(
             scene=dict(
-                xaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title='', autorange=True),
-                yaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title='', autorange=True),
-                zaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title='', autorange=True),
+                xaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title=''),
+                yaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title=''),
+                zaxis=dict(visible=True, showgrid=True, gridcolor='#334155', showbackground=False, zeroline=False, showticklabels=False, title=''),
                 bgcolor='rgba(0,0,0,0)',
-                aspectmode='data'
+                aspectmode='data',
+                camera=dict(
+                    center=dict(x=q_coords['x'], y=q_coords['y'], z=q_coords['z']),
+                    eye=dict(x=q_coords['x'] + 1.0, y=q_coords['y'] + 1.0, z=q_coords['z'] + 1.0)
+                )
             ),
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
@@ -526,17 +233,5 @@ class ManifoldVisualizer:
             )
         )
         
-        # Camera Focus: Center on the first novel cluster if present
-        if not cluster_coords.empty:
-            centroid = cluster_coords.iloc[0]
-            # Ensure scene exists in layout_args
-            if 'scene' not in layout_args:
-                layout_args['scene'] = {}
-            layout_args['scene']['camera'] = dict(
-                center=dict(x=float(centroid['x']), y=float(centroid['y']), z=float(centroid['z'])),
-                eye=dict(x=float(centroid['x']) + 1.5, y=float(centroid['y']) + 1.5, z=float(centroid['z']) + 1.5)
-            )
-            
         fig.update_layout(**layout_args)
-        
         return fig

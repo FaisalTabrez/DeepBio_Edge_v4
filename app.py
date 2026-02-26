@@ -312,7 +312,16 @@ st.markdown(f"""
 # KPI Metrics
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 total_seqs = atlas.table.count_rows() if atlas.table else 0
-index_size = "482 MB" # Mock
+
+# Calculate actual index size
+index_size_bytes = 0
+if atlas.db_path and os.path.exists(atlas.db_path):
+    for dirpath, _, filenames in os.walk(atlas.db_path):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            if not os.path.islink(fp):
+                index_size_bytes += os.path.getsize(fp)
+index_size = f"{index_size_bytes / (1024 * 1024):.1f} MB" if index_size_bytes > 0 else "0 MB"
 
 # Calculate Novelty Rate based on clusters
 if 'novel_clusters' in st.session_state and st.session_state.novel_clusters:
@@ -542,17 +551,9 @@ with tab_monitor:
                             top_hit['vector'] = vec_flat # Explicitly attach vector to the result object
                             
                             st.session_state.scan_results_buffer.insert(0, top_hit)
-
-                            # Store Context for Tab 2 Visualizer
-                            st.session_state.viz_context = {
-                                'ref_hits': results_viz,
-                                'query_vec': vec_flat,
-                                'display_name': top_hit['display_name'],
-                                'is_novel': bool(top_hit['is_novel']) # Double check
-                            }
                         else:
                             # Handle case where taxonomy failed or no results
-                            logger.warning(f"Skipping viz context update for sequence {seq_id} due to empty results.")
+                            logger.warning(f"Skipping result buffer update for sequence {seq_id} due to empty results.")
 
                             
                         # Real-time UI Update hack (rerun not ideal in loop, so we rely on session state being read next pass or manual container update if possible)
@@ -744,6 +745,13 @@ with tab_monitor:
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
+                        
+                        if st.button("VIEW GENOMIC TOPOLOGY", key=f"btn_viz_{hit.get('query_id', 'Unknown')}"):
+                            st.session_state['active_viz_id'] = hit.get('query_id')
+                            st.session_state['active_viz_vector'] = hit.get('vector')
+                            st.session_state['active_viz_name'] = hit.get('display_name')
+                            st.session_state['active_viz_novel'] = is_novel
+                            st.rerun()
                     
             else:
                 with results_container:
@@ -751,11 +759,49 @@ with tab_monitor:
                     
         with comp_tab:
             if st.session_state.scan_results_buffer and len(st.session_state.scan_results_buffer) > 0:
-                # Build hierarchy data for Sunburst
-                hierarchy_data = []
+                st.markdown("### COMMUNITY ANALYTICS")
                 
-                # Check if we have clustered data
+                # 1. Diversity Metrics
+                total_seqs_processed = len(st.session_state.scan_results_buffer)
+                
+                # Calculate Species Richness (S) and Shannon-Wiener Index (H')
+                species_counts = {}
                 has_clusters = 'ntu_registry' in st.session_state and st.session_state['ntu_registry']
+                
+                for hit in st.session_state.scan_results_buffer:
+                    cluster_id = hit.get('cluster_id')
+                    if has_clusters and cluster_id and cluster_id != -1:
+                        species_name = f"[NTU] {cluster_id}"
+                    else:
+                        species_name = hit.get('display_name', 'Unknown')
+                    
+                    species_counts[species_name] = species_counts.get(species_name, 0) + 1
+                
+                # Species Richness (S)
+                S = len(species_counts)
+                
+                # Shannon-Wiener Index (H')
+                H_prime = 0
+                for count in species_counts.values():
+                    p_i = count / total_seqs_processed
+                    if p_i > 0:
+                        H_prime -= p_i * np.log(p_i)
+                
+                # Novelty Ratio
+                num_ntus = len(st.session_state.get('ntu_registry', [])) if has_clusters else 0
+                novelty_ratio = (num_ntus / total_seqs_processed) * 100 if total_seqs_processed > 0 else 0
+                
+                # Display Metrics
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Species Richness (S)", f"{S}")
+                m2.metric("Shannon-Wiener Index (H')", f"{H_prime:.3f}")
+                m3.metric("Novelty Ratio", f"{novelty_ratio:.1f}%", f"{num_ntus} NTUs")
+                
+                st.divider()
+                
+                # 2. Taxonomic Sunburst
+                st.markdown("#### Taxonomic Sunburst")
+                hierarchy_data = []
                 processed_clusters = set()
                 
                 for hit in st.session_state.scan_results_buffer:
@@ -767,42 +813,47 @@ with tab_monitor:
                         processed_clusters.add(cluster_id)
                         
                         entity = hit.get('cluster_entity', {})
-                        lineage = entity.get('lineage', 'Unknown;Unknown;Unknown;Unknown;Unknown')
-                        parts = lineage.split(';')
                         
-                        while len(parts) < 5:
-                            parts.append('Unknown')
-                            
-                        phylum = parts[0].strip() if parts[0].strip() else 'Unknown'
-                        class_name = parts[1].strip() if parts[1].strip() else 'Unknown'
-                        order = parts[2].strip() if parts[2].strip() else 'Unknown'
-                        genus = f"[NOVEL] {entity.get('otu_id', 'NTU')}"
+                        # Try to get lineage from the first member's reliability if available
+                        kingdom = "Animalia" # Default for deep sea
+                        phylum = "Unknown"
+                        class_name = "Unknown"
+                        family = "Unknown"
+                        
+                        if entity.get('members') and len(entity.get('members')) > 0:
+                            first_member_id = entity['members'][0]['id']
+                            for h in st.session_state.scan_results_buffer:
+                                if h.get('query_id') == first_member_id:
+                                    rel = h.get('reliability', {})
+                                    phylum = rel.get('Phylum', {}).get('name', 'Unknown')
+                                    class_name = rel.get('Class', {}).get('name', 'Unknown')
+                                    family = rel.get('Family', {}).get('name', 'Unknown')
+                                    break
+                        
+                        resolved_name = f"[NOVEL] {entity.get('otu_id', 'NTU')}"
                         
                         hierarchy_data.append({
+                            'Kingdom': kingdom,
                             'Phylum': phylum,
                             'Class': class_name,
-                            'Order': order,
-                            'Genus': genus,
+                            'Family': family,
+                            'Resolved_Name': resolved_name,
                             'Count': entity.get('cluster_size', 1)
                         })
                     else:
-                        lineage = hit.get('display_lineage', 'Unknown;Unknown;Unknown;Unknown;Unknown')
-                        parts = lineage.split(';')
-                        
-                        # Pad or truncate to ensure we have Phylum, Class, Order, Family, Genus
-                        while len(parts) < 5:
-                            parts.append('Unknown')
-                        
-                        phylum = parts[0].strip() if parts[0].strip() else 'Unknown'
-                        class_name = parts[1].strip() if parts[1].strip() else 'Unknown'
-                        order = parts[2].strip() if parts[2].strip() else 'Unknown'
-                        genus = parts[4].strip() if len(parts) > 4 and parts[4].strip() else 'Unknown'
+                        rel = hit.get('reliability', {})
+                        kingdom = "Animalia"
+                        phylum = rel.get('Phylum', {}).get('name', 'Unknown')
+                        class_name = rel.get('Class', {}).get('name', 'Unknown')
+                        family = rel.get('Family', {}).get('name', 'Unknown')
+                        resolved_name = hit.get('display_name', 'Unknown')
                         
                         hierarchy_data.append({
+                            'Kingdom': kingdom,
                             'Phylum': phylum,
                             'Class': class_name,
-                            'Order': order,
-                            'Genus': genus,
+                            'Family': family,
+                            'Resolved_Name': resolved_name,
                             'Count': 1
                         })
                 
@@ -811,7 +862,7 @@ with tab_monitor:
                 # Create Sunburst Chart
                 fig_sunburst = px.sunburst(
                     df_comp, 
-                    path=['Phylum', 'Class', 'Order', 'Genus'], 
+                    path=['Kingdom', 'Phylum', 'Class', 'Family', 'Resolved_Name'], 
                     values='Count',
                     color='Phylum',
                     color_discrete_sequence=px.colors.sequential.Tealgrn, # Bioluminescent gradient
@@ -831,8 +882,68 @@ with tab_monitor:
                 )
                 
                 st.plotly_chart(fig_sunburst, use_container_width=True)
+                
+                st.divider()
+                
+                # 3. Rarefaction Curve
+                st.markdown("#### Rarefaction Curve (Discovery Rate)")
+                
+                # Calculate cumulative unique species over time
+                # Since scan_results_buffer has latest on top (index 0), we need to reverse it to simulate time
+                chronological_buffer = list(reversed(st.session_state.scan_results_buffer))
+                
+                seen_species = set()
+                cumulative_species = []
+                
+                for hit in chronological_buffer:
+                    cluster_id = hit.get('cluster_id')
+                    if has_clusters and cluster_id and cluster_id != -1:
+                        species_name = f"[NTU] {cluster_id}"
+                    else:
+                        species_name = hit.get('display_name', 'Unknown')
+                        
+                    seen_species.add(species_name)
+                    cumulative_species.append(len(seen_species))
+                
+                df_rarefaction = pd.DataFrame({
+                    'Sequences Processed': range(1, len(cumulative_species) + 1),
+                    'Unique Species Discovered': cumulative_species
+                })
+                
+                fig_rarefaction = px.line(
+                    df_rarefaction, 
+                    x='Sequences Processed', 
+                    y='Unique Species Discovered',
+                    color_discrete_sequence=['#00E5FF']
+                )
+                
+                fig_rarefaction.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='#E2E8F0', family='Consolas'),
+                    xaxis=dict(showgrid=True, gridcolor='#334155', title='Sequences Processed'),
+                    yaxis=dict(showgrid=True, gridcolor='#334155', title='Unique Species Discovered'),
+                    margin=dict(t=10, l=0, r=0, b=0)
+                )
+                
+                st.plotly_chart(fig_rarefaction, use_container_width=True)
+                
+                # Scientific Hook: Check if curve is still rising
+                if len(cumulative_species) > 5:
+                    recent_discoveries = cumulative_species[-1] - cumulative_species[-5]
+                    if recent_discoveries > 0:
+                        st.warning("SAMPLING EFFORT INSUFFICIENT - ADDITIONAL SEQUENCING RECOMMENDED")
+                    else:
+                        st.success("SAMPLING EFFORT SUFFICIENT - ASYMPTOTE REACHED")
+                elif len(cumulative_species) > 1:
+                    recent_discoveries = cumulative_species[-1] - cumulative_species[0]
+                    if recent_discoveries > 0:
+                        st.warning("SAMPLING EFFORT INSUFFICIENT - ADDITIONAL SEQUENCING RECOMMENDED")
+                    else:
+                        st.success("SAMPLING EFFORT SUFFICIENT - ASYMPTOTE REACHED")
+                
             else:
-                st.info("Waiting for Scan Data to generate Community Composition...")
+                st.info("Waiting for Scan Data to generate Community Analytics...")
 
     # 5. System Logs
     st.markdown("### SYSTEM LOGS")
@@ -874,30 +985,33 @@ with tab_visualizer:
                     st.info("Re-clustered: No NTUs found.")
                 st.rerun()
     
-    if 'viz_context' in st.session_state and st.session_state.viz_context:
-        ctx = st.session_state.viz_context
+    if 'active_viz_id' in st.session_state and st.session_state['active_viz_id']:
+        active_id = st.session_state['active_viz_id']
+        active_name = st.session_state.get('active_viz_name', active_id)
         
-        with st.spinner("Calculating 3D Manifold Projection..."):
-            # Prepare clusters
-            n_clusters = st.session_state.get('ntu_registry', st.session_state.get('novel_clusters', []))
+        st.markdown(f"### HIGH-RESOLUTION ZOOM: {active_name}")
+        
+        with st.spinner("Calculating Localized PCA Manifold..."):
+            # Generate the localized manifold if not cached
+            if 'manifold_cache' not in st.session_state or active_id not in st.session_state['manifold_cache']:
+                viz.get_neighborhood_manifold(
+                    query_vector=st.session_state['active_viz_vector'],
+                    query_id=active_id,
+                    atlas_manager=atlas,
+                    top_k=500
+                )
             
-            fig_3d = viz.create_plot(
-                reference_hits=ctx['ref_hits'],
-                query_vector=ctx['query_vec'],
-                query_display_name=ctx['display_name'],
-                is_novel=ctx['is_novel'],
-                atlas_manager=atlas,
-                novel_clusters=n_clusters
-            )
+            fig_3d = viz.create_localized_plot(active_id)
             
-        # @UX-Visionary: UI Feedback
-        bg_points = len(viz.background_coords) if hasattr(viz, 'background_coords') and viz.background_coords is not None else 0
-        st.write(f'DEBUG: Plotting {bg_points} background points')
         st.plotly_chart(fig_3d, use_container_width=True)
-        st.caption("Real-time Holographic Projection: 768-dim PCA Reduction of evolutionary neighborhood.")
+        st.caption("Localized Holographic Projection: 500 Nearest Neighbors in Latent Space.")
         
+        if st.button("← CLEAR SELECTION"):
+            st.session_state['active_viz_id'] = None
+            st.rerun()
+            
     else:
-        st.info("System Idle. Initiate a Scan to project the biodiversity manifold.")
+        st.info("Please select a sequence from the Real-Time Monitor to view its local topology.")
     
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -915,16 +1029,9 @@ with tab_discovery:
             st.success(f"DISCOVERY ALERT: Identified {len(novel_entities)} Potential New Species Groups!")
             
             # 3D Map at the top
-            if 'viz_context' in st.session_state and st.session_state.viz_context:
-                ctx = st.session_state.viz_context
-                fig_3d = viz.create_plot(
-                    reference_hits=ctx['ref_hits'],
-                    query_vector=ctx['query_vec'],
-                    query_display_name=ctx['display_name'],
-                    is_novel=ctx['is_novel'],
-                    atlas_manager=atlas,
-                    novel_clusters=novel_entities
-                )
+            if 'active_viz_id' in st.session_state and st.session_state['active_viz_id']:
+                active_id = st.session_state['active_viz_id']
+                fig_3d = viz.create_localized_plot(active_id)
                 
                 # Enable selection
                 event = st.plotly_chart(

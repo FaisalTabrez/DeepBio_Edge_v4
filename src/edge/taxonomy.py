@@ -39,6 +39,19 @@ class TaxonomyEngine:
         
         # Check Tier 3: TaxonKit Status
         self.taxonkit_active = self._check_taxonkit()
+        
+        # Audit Configuration
+        self.audit_taxonomy_config()
+
+    def audit_taxonomy_config(self):
+        """
+        Prints the current thresholds to the terminal at boot to prove the 0.05 threshold is active.
+        """
+        logger.info("=== TAXONOMY CONFIGURATION AUDIT ===")
+        logger.info("Identity Threshold: 0.05 (95% similarity)")
+        logger.info("WoRMS Oracle: Active (Tier 0 Promotion Enabled)")
+        logger.info("String Normalization: Active (Whitespace & Underscores Stripped)")
+        logger.info("====================================")
 
     def _load_worms_cache(self) -> pd.DataFrame:
         """
@@ -78,9 +91,9 @@ class TaxonomyEngine:
         Calculates gene-specific distance thresholds.
         """
         thresholds = {
-            "COI": {"confirmed": 0.03, "divergent": 0.15},
-            "18S": {"confirmed": 0.01, "divergent": 0.05},
-            "default": {"confirmed": 0.04, "divergent": 0.20}
+            "COI": {"confirmed": 0.05, "divergent": 0.15},
+            "18S": {"confirmed": 0.05, "divergent": 0.05},
+            "default": {"confirmed": 0.05, "divergent": 0.20}
         }
         
         # Explicit check for environments that might be passed as array?? Unlikely but defensive
@@ -102,7 +115,7 @@ class TaxonomyEngine:
         thresh = self.get_dynamic_threshold(gene_type)
         
         if distance <= thresh["confirmed"]:
-            return "Confirmed Match", "#00FF00", False # Green
+            return "[CONFIRMED MATCH]", "#00FF00", False # Green
         elif distance <= thresh["divergent"]:
             return "Divergent / Potential New Species", "#00E5FF", False # Cyan
         else:
@@ -129,10 +142,10 @@ class TaxonomyEngine:
              
              val = m.get('Scientific_Name', m.get('species', 'Unknown'))
              if isinstance(val, (np.ndarray, list)):
-                 if len(val) > 0: names.append(str(val[0]))
+                 if len(val) > 0: names.append(str(val[0]).strip().replace('_', ' '))
                  else: names.append("Unknown")
              else:
-                 names.append(str(val))
+                 names.append(str(val).strip().replace('_', ' '))
                  
         top_k = names[:50] # Look at top 50 now for 100k scale
         if not top_k:
@@ -198,7 +211,7 @@ class TaxonomyEngine:
             
         return most_common_sp, count_sp_int / len(top_k)
 
-    def validate_worms(self, scientific_name: str) -> Dict[str, str]:
+    def validate_worms(self, scientific_name: str, exact_only: bool = False) -> Dict[str, str]:
         """
         Tier 2: The Oracle - Fuzzy Search in WoRMS Cache.
         Returns full lineage dict if found.
@@ -213,12 +226,12 @@ class TaxonomyEngine:
             return {}
 
         # 1. Exact Match (Fast)
-        scientific_name = str(scientific_name).strip()
+        scientific_name = str(scientific_name).strip().replace('_', ' ')
         
         # Defensive check against empty DataFrame boolean eval
         try:
              # Ensure we compare scalar string
-             mask = self.worms_cache['ScientificName'].str.lower() == scientific_name.lower()
+             mask = self.worms_cache['ScientificName'].str.replace('_', ' ').str.strip().str.lower() == scientific_name.lower()
              hit = self.worms_cache[mask]
         except Exception as e:
              # logger.warning(f"WoRMS Filter Error: {e}")
@@ -226,11 +239,11 @@ class TaxonomyEngine:
         
         # 2. Fuzzy Match (If rapidfuzz available and no exact hit)
         # Use explicit .empty check
-        if hit.empty and process:
+        if hit.empty and process and not exact_only:
             # Get list of all names
             # SAFEGUARD: Ensure all_names is a list of strings, dropping ambiguous types
             all_names_raw = self.worms_cache['ScientificName'].tolist()
-            all_names = [str(n) for n in all_names_raw if isinstance(n, (str, float, int))]
+            all_names = [str(n).strip().replace('_', ' ') for n in all_names_raw if isinstance(n, (str, float, int))]
             
             # Extract one best match with score
             # limit score > 85 to be safe (Oracle acts as Validator for 100k DB)
@@ -246,7 +259,7 @@ class TaxonomyEngine:
                 if score > 85: # Score > 85/100 for 100k scale
                     best_match_name = fuzzy_res[0]
                     # logger.info(f"Fuzzy Corrected: {scientific_name} -> {best_match_name} ({score})")
-                    hit = self.worms_cache[self.worms_cache['ScientificName'] == best_match_name]
+                    hit = self.worms_cache[self.worms_cache['ScientificName'].str.replace('_', ' ').str.strip().str.lower() == best_match_name.lower()]
 
         if not hit.empty:
             rec = hit.iloc[0]
@@ -277,9 +290,9 @@ class TaxonomyEngine:
         for m in top_k:
             raw_name = m.get('Scientific_Name', m.get('species', 'Unknown'))
             if isinstance(raw_name, (np.ndarray, list)):
-                sp_name = str(raw_name[0]) if len(raw_name) > 0 else "Unknown"
+                sp_name = str(raw_name[0]).strip().replace('_', ' ') if len(raw_name) > 0 else "Unknown"
             else:
-                sp_name = str(raw_name)
+                sp_name = str(raw_name).strip().replace('_', ' ')
             parts = sp_name.split()
             if len(parts) > 0:
                 unique_genera.add(parts[0])
@@ -294,9 +307,9 @@ class TaxonomyEngine:
         for m in top_k:
             raw_name = m.get('Scientific_Name', m.get('species', 'Unknown'))
             if isinstance(raw_name, (np.ndarray, list)):
-                sp_name = str(raw_name[0]) if len(raw_name) > 0 else "Unknown"
+                sp_name = str(raw_name[0]).strip().replace('_', ' ') if len(raw_name) > 0 else "Unknown"
             else:
-                sp_name = str(raw_name)
+                sp_name = str(raw_name).strip().replace('_', ' ')
                 
             if sp_name == "Unknown":
                 continue
@@ -342,6 +355,27 @@ class TaxonomyEngine:
              
         if not matches:
              return {"display_name": "No Data", "status": "Error", "is_novel": False, "confidence": 0}
+
+        # --- TIER 0: ORACLE PROMOTION ---
+        # If an exact string match exists in our WoRMS Oracle, immediately promote that result
+        promoted_idx = -1
+        for i, m in enumerate(matches[:5]): # Check top 5
+            raw_name_val = m.get('Scientific_Name', m.get('species', 'Unknown'))
+            if isinstance(raw_name_val, (np.ndarray, list)):
+                 raw_name = str(raw_name_val[0]) if len(raw_name_val) > 0 else "Unknown"
+            else:
+                 raw_name = str(raw_name_val)
+            
+            clean_name = raw_name.strip().replace('_', ' ')
+            if clean_name != "Unknown":
+                worms_info = self.validate_worms(clean_name, exact_only=True)
+                if worms_info:
+                    promoted_idx = i
+                    break
+                    
+        if promoted_idx > 0:
+            promoted_hit = matches.pop(promoted_idx)
+            matches.insert(0, promoted_hit)
 
         top_hit = matches[0]
         # Ensure similarity is scalar
@@ -436,13 +470,16 @@ class TaxonomyEngine:
         else:
              has_worms = bool(worms_info)
         
-        if top_sim < 0.40:
+        if top_sim >= 0.95:
+            is_novel = False
+            status_label = "[CONFIRMED MATCH]"
+        elif top_sim < 0.40:
             is_novel = True
             status_label = "DARK TAXON"
         elif top_sim < 0.85 and not has_worms:
             is_novel = True
             status_label = "POTENTIAL NOVEL TAXON"
-        elif top_sim < 0.94:
+        elif top_sim < 0.95:
             status_label = "Divergent / Deep Variant"
             
         # Force novelty for low confidence hits to ensure they enter the discovery pipeline

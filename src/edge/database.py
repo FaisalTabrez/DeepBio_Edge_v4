@@ -44,7 +44,7 @@ class AtlasManager:
                 logger.info(f"Connected to existing atlas: '{self.table_name}'")
                 print(f"[DATABASE] Successfully connected to 100k Atlas on {self.db_path}")
             else:
-                logger.warning(f"Table '{self.table_name}' not found. Use ingest_atlas() to seed data.")
+                raise FileNotFoundError(f"CRITICAL: 100k Atlas table '{self.table_name}' not found in {self.db_path}. System cannot operate without the reference atlas.")
 
         except OSError as e:
             if "Incorrect function" in str(e) or "[WinError 1]" in str(e):
@@ -122,6 +122,12 @@ class AtlasManager:
             # Map 'species' to 'Scientific_Name' for downstream compatibility
             if 'species' in results.columns and 'Scientific_Name' not in results.columns:
                 results['Scientific_Name'] = results['species']
+                
+            # @Bio-Taxon: String Normalization
+            if 'Scientific_Name' in results.columns:
+                results['Scientific_Name'] = results['Scientific_Name'].astype(str).str.replace('_', ' ').str.strip()
+            if 'species' in results.columns:
+                results['species'] = results['species'].astype(str).str.replace('_', ' ').str.strip()
             
             # Return pure records including vector for Visualization
             cols_to_return = ['Scientific_Name', 'species', 'similarity', 'id', '_distance']
