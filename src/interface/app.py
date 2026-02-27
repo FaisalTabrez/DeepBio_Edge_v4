@@ -787,18 +787,19 @@ with tab_visualizer:
             # Prepare clusters
             n_clusters = st.session_state.get('novel_clusters', [])
             
-            fig_3d = viz.create_plot(
-                reference_hits=ctx['ref_hits'],
-                query_vector=ctx['query_vec'],
-                query_display_name=ctx['display_name'],
-                is_novel=ctx['is_novel'],
-                atlas_manager=atlas,
-                novel_clusters=n_clusters
-            )
+            # We need to use the localized plot since create_plot was removed
+            # First ensure the manifold is generated
+            if 'manifold_cache' not in st.session_state or ctx['display_name'] not in st.session_state['manifold_cache']:
+                viz.get_neighborhood_manifold(
+                    query_vector=ctx['query_vec'],
+                    query_id=ctx['display_name'],
+                    atlas_manager=atlas,
+                    top_k=500
+                )
+            
+            fig_3d = viz.create_localized_plot(ctx['display_name'])
             
         # @UX-Visionary: UI Feedback
-        bg_points = len(viz.background_coords) if hasattr(viz, 'background_coords') and viz.background_coords is not None else 0
-        st.write(f'DEBUG: Plotting {bg_points} background points')
         st.plotly_chart(fig_3d, use_container_width=True)
         st.caption("Real-time Holographic Projection: 768-dim PCA Reduction of evolutionary neighborhood.")
         
@@ -823,14 +824,17 @@ with tab_discovery:
             # 3D Map at the top
             if 'viz_context' in st.session_state and st.session_state.viz_context:
                 ctx = st.session_state.viz_context
-                fig_3d = viz.create_plot(
-                    reference_hits=ctx['ref_hits'],
-                    query_vector=ctx['query_vec'],
-                    query_display_name=ctx['display_name'],
-                    is_novel=ctx['is_novel'],
-                    atlas_manager=atlas,
-                    novel_clusters=novel_entities
-                )
+                
+                # Ensure manifold is generated
+                if 'manifold_cache' not in st.session_state or ctx['display_name'] not in st.session_state['manifold_cache']:
+                    viz.get_neighborhood_manifold(
+                        query_vector=ctx['query_vec'],
+                        query_id=ctx['display_name'],
+                        atlas_manager=atlas,
+                        top_k=500
+                    )
+                
+                fig_3d = viz.create_localized_plot(ctx['display_name'])
                 
                 # Enable selection
                 event = st.plotly_chart(
