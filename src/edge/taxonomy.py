@@ -135,6 +135,15 @@ class TaxonomyEngine:
         if isinstance(matches, pd.DataFrame):
              matches = matches.to_dict('records')
 
+        uninformative = ['unknown', 'uncultured', 'environmental sample', 'eukaryote', 'biota', 'none']
+        
+        def is_informative(name: str) -> bool:
+            name_lower = name.lower()
+            for uninfo in uninformative:
+                if uninfo in name_lower:
+                    return False
+            return True
+
         names = []
         for m in matches:
              # Ensure m is a dict
@@ -142,10 +151,13 @@ class TaxonomyEngine:
              
              val = m.get('Scientific_Name', m.get('species', 'Unknown'))
              if isinstance(val, (np.ndarray, list)):
-                 if len(val) > 0: names.append(str(val[0]).strip().replace('_', ' '))
-                 else: names.append("Unknown")
+                 if len(val) > 0: name_str = str(val[0]).strip().replace('_', ' ')
+                 else: name_str = "Unknown"
              else:
-                 names.append(str(val).strip().replace('_', ' '))
+                 name_str = str(val).strip().replace('_', ' ')
+                 
+             if is_informative(name_str):
+                 names.append(name_str)
                  
         top_k = names[:50] # Look at top 50 now for 100k scale
         if not top_k:
@@ -281,6 +293,15 @@ class TaxonomyEngine:
         ranks = ["Phylum", "Class", "Order", "Family", "Genus", "Species"]
         rank_counts = {r: Counter() for r in ranks}
         
+        uninformative = ['unknown', 'uncultured', 'environmental sample', 'eukaryote', 'biota', 'none']
+        
+        def is_informative(name: str) -> bool:
+            name_lower = name.lower()
+            for uninfo in uninformative:
+                if uninfo in name_lower:
+                    return False
+            return True
+        
         top_k = matches[:50]
         if not top_k:
             return {}
@@ -293,17 +314,22 @@ class TaxonomyEngine:
                 sp_name = str(raw_name[0]).strip().replace('_', ' ') if len(raw_name) > 0 else "Unknown"
             else:
                 sp_name = str(raw_name).strip().replace('_', ' ')
+            
+            if not is_informative(sp_name):
+                continue
+                
             parts = sp_name.split()
             if len(parts) > 0:
                 unique_genera.add(parts[0])
                 
         genus_to_lineage = {}
         for g in unique_genera:
-            if g != "Unknown":
+            if is_informative(g):
                 worms_info = self.validate_worms(g)
                 if worms_info:
                     genus_to_lineage[g] = worms_info
                     
+        valid_votes = 0
         for m in top_k:
             raw_name = m.get('Scientific_Name', m.get('species', 'Unknown'))
             if isinstance(raw_name, (np.ndarray, list)):
@@ -311,9 +337,10 @@ class TaxonomyEngine:
             else:
                 sp_name = str(raw_name).strip().replace('_', ' ')
                 
-            if sp_name == "Unknown":
+            if not is_informative(sp_name):
                 continue
                 
+            valid_votes += 1
             rank_counts["Species"][sp_name] += 1
             
             parts = sp_name.split()
@@ -325,10 +352,10 @@ class TaxonomyEngine:
                 if worms_info:
                     for r in ["Phylum", "Class", "Order", "Family"]:
                         val = worms_info.get(r, "Unknown")
-                        if val != "Unknown":
+                        if is_informative(val):
                             rank_counts[r][val] += 1
                             
-        total_votes = len(top_k)
+        total_votes = valid_votes if valid_votes > 0 else 1
         reliability = {}
         
         for r in ranks:
@@ -418,6 +445,32 @@ class TaxonomyEngine:
         elif consensus_conf > 0.8:
             working_name = consensus_name
 
+        # --- RANK BACK-TRACKING ---
+        uninformative = ['unknown', 'uncultured', 'environmental sample', 'eukaryote', 'biota', 'none']
+        
+        def is_informative(name: str) -> bool:
+            name_lower = name.lower()
+            for uninfo in uninformative:
+                if uninfo in name_lower:
+                    return False
+            return True
+
+        if not is_informative(working_name) and reliability:
+            found_rank = None
+            found_name = None
+            for rank in ["Genus", "Family", "Order", "Class", "Phylum"]:
+                rank_info = reliability.get(rank, {})
+                rank_name = rank_info.get("name", "Unknown")
+                if is_informative(rank_name):
+                    found_rank = rank
+                    found_name = rank_name
+                    break
+            
+            if found_rank == "Genus":
+                working_name = f"{found_name} sp."
+            elif found_rank:
+                working_name = f"Candidate Genus in {found_rank} {found_name}"
+
         # --- TIER 2: WoRMS ORACLE ---
         # "Fix for Bathymodiolus": Fuzzy check the working name
         worms_info = self.validate_worms(working_name)
@@ -494,14 +547,16 @@ class TaxonomyEngine:
             phylum_conf = reliability.get("Phylum", {}).get("confidence", 0)
             phylum_name = reliability.get("Phylum", {}).get("name", "Unknown")
             
-            if family_conf >= 0.80 and family_name != "Unknown":
+            if family_conf >= 0.80 and family_name != "Unknown" and is_informative(family_name):
                 final_name = f"Potential Novel Genus [Family: {family_name}]"
-            elif phylum_conf >= 0.80 and phylum_name != "Unknown":
+            elif phylum_conf >= 0.80 and phylum_name != "Unknown" and is_informative(phylum_name):
                 final_name = f"Potential Novel Family [Phylum: {phylum_name}]"
             else:
-                final_name = "Unclassified Dark Taxon"
+                if "Candidate Genus" not in final_name:
+                    final_name = "Unclassified Dark Taxon"
         elif is_novel:
-            final_name = f"Cryptic {final_name} sp."
+            if "Candidate Genus" not in final_name:
+                final_name = f"Cryptic {final_name} sp."
 
         # --- TAXONOMIC RELIABILITY FORMATTING ---
         taxonomic_reliability_str = ""

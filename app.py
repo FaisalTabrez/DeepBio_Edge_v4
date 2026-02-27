@@ -752,6 +752,7 @@ with tab_monitor:
                             st.session_state['active_viz_vector'] = hit.get('vector')
                             st.session_state['active_viz_name'] = hit.get('display_name')
                             st.session_state['active_viz_novel'] = is_novel
+                            st.session_state['navigation'] = 'GENOMIC MANIFOLD'
                             st.rerun()
                     
             else:
@@ -993,8 +994,10 @@ with tab_visualizer:
         st.markdown(f"### HIGH-RESOLUTION ZOOM: {active_name}")
         
         with st.spinner("Calculating Localized PCA Manifold..."):
+            log_event(f"[UI] Attempting to render topology for ID: {active_id}")
             # Generate the localized manifold if not cached
             if 'manifold_cache' not in st.session_state or active_id not in st.session_state['manifold_cache']:
+                log_event(f"[UI] Cache miss for {active_id}. Triggering Real-Time Neighborhood Search.")
                 viz.get_neighborhood_manifold(
                     query_vector=st.session_state['active_viz_vector'],
                     query_id=active_id,
@@ -1137,9 +1140,19 @@ with tab_discovery:
                     export_data.append(cluster_fasta)
                     
                     # GenBank Export Button
-                    if st.button("EXPORT DISCOVERY ARCHIVE", key=f"exp_{entity['otu_id']}", icon=":material/folder_zip:"):
-                        import json
-                        export_dir = Path("E:/DeepBio_Scan/results") / entity['otu_id']
+                    col_btn1, col_btn2 = st.columns(2)
+                    with col_btn1:
+                        if st.button("VIEW GENOMIC TOPOLOGY", key=f"btn_viz_cluster_{entity['otu_id']}"):
+                            st.session_state['active_viz_id'] = entity.get('representative_id')
+                            st.session_state['active_viz_vector'] = entity.get('avg_vector')
+                            st.session_state['active_viz_name'] = entity['otu_id']
+                            st.session_state['active_viz_novel'] = True
+                            st.session_state['navigation'] = 'GENOMIC MANIFOLD'
+                            st.rerun()
+                    with col_btn2:
+                        if st.button("EXPORT ARCHIVE", key=f"exp_{entity['otu_id']}", icon=":material/folder_zip:"):
+                            import json
+                            export_dir = Path("E:/DeepBio_Scan/results") / entity['otu_id']
                         if not Path("E:/").exists():
                             export_dir = Path("data/results") / entity['otu_id']
                         

@@ -62,22 +62,30 @@ class DiscoveryEngine:
         """@Embedder-ML: Computes geometric center of the cluster in latent space."""
         return np.mean(vectors, axis=0)
 
-    def _find_nearest_neighbor(self, centroid: np.ndarray) -> Tuple[str, float, str, str]:
+    def _find_nearest_neighbor(self, centroid: np.ndarray) -> Tuple[str, float, str, str, str]:
         """
         Queries the Atlas to find the nearest KNOWN relative to this new cluster.
         Performs a 'Deep Search' (top 50) to find Rank Stability.
-        Returns: (Taxon_Name, Distance, Consensus_Rank, Consensus_Name)
+        Returns: (Taxon_Name, Distance, Consensus_Rank, Consensus_Name, Clean_Prefix)
         """
         # @BioArch: Centroid Anchoring - top_k=50 for Deep Search
         results = self.atlas.query_vector(centroid, top_k=50)
         if not results:
-            return "Unknown", 1.0, "Unknown", "Unknown"
+            return "Unknown", 1.0, "Unknown", "Unknown", "Unknown"
             
         # Calculate distance to the absolute nearest known point
         hit = results[0]
         name = hit.get('Scientific_Name', hit.get('species', 'Unknown'))
         similarity = hit.get('similarity', 0.0)
         distance = 1.0 - similarity
+        
+        def is_informative(n: str) -> bool:
+            if not n: return False
+            n_lower = n.lower()
+            uninformative = {'unknown', 'uncultured', 'environmental sample', 'eukaryote', 'biota', 'none'}
+            for u in uninformative:
+                if u in n_lower: return False
+            return True
         
         # High-Level Consensus: Rank Stability
         families = []
@@ -87,11 +95,11 @@ class DiscoveryEngine:
             lineage = r.get('lineage', '')
             if lineage:
                 parts = lineage.split(';')
-                if len(parts) >= 2:
+                if len(parts) >= 2 and is_informative(parts[1].strip()):
                     phyla.append(parts[1].strip()) # Phylum is usually the second element
-                if len(parts) >= 4:
+                if len(parts) >= 4 and is_informative(parts[3].strip()):
                     families.append(parts[3].strip())
-                if len(parts) >= 5:
+                if len(parts) >= 5 and is_informative(parts[4].strip()):
                     genera.append(parts[4].strip())
                     
         family_counts = Counter(families)
@@ -100,18 +108,21 @@ class DiscoveryEngine:
         
         consensus_rank = "Unknown"
         consensus_name = "Unknown"
+        clean_prefix = "Unknown"
         
         if phylum_counts:
             top_phylum, p_count = phylum_counts.most_common(1)[0]
             if p_count >= 40: # 80% of 50
                 consensus_rank = "Phylum"
                 consensus_name = top_phylum
+                clean_prefix = top_phylum
         
         if family_counts:
             top_family, f_count = family_counts.most_common(1)[0]
             if f_count >= 40: # 80% of 50
                 consensus_rank = "Family"
                 consensus_name = top_family
+                clean_prefix = top_family
                 
                 # Check if genera are mixed
                 if genus_counts:
@@ -119,8 +130,9 @@ class DiscoveryEngine:
                     if g_count < 5: # Less than 10% of 50
                         consensus_rank = "Novel Generic Unit"
                         consensus_name = f"Novel Generic Unit [Family: {top_family}]"
+                        clean_prefix = top_family
                         
-        return name, distance, consensus_rank, consensus_name
+        return name, distance, consensus_rank, consensus_name, clean_prefix
 
     def analyze_novelty(self, session_buffer: List[Dict]) -> List[Dict]:
         """
@@ -209,7 +221,7 @@ class DiscoveryEngine:
             
             # --- @BioArch: Biological Divergence Hook ---
             # Deep Search for Rank Stability
-            nearest_relative, centroid_dist, consensus_rank, consensus_name = self._find_nearest_neighbor(centroid)
+            nearest_relative, centroid_dist, consensus_rank, consensus_name, clean_prefix = self._find_nearest_neighbor(centroid)
             
             # WoRMS Validation for the Consensus Name
             worms_lineage = "Unknown"
@@ -233,15 +245,15 @@ class DiscoveryEngine:
             
             # Generate Provisional ID
             # e.g. DeepBio-NTU-Modiolidae-001
-            if consensus_name != "Unknown":
-                otu_id = f"DeepBio-NTU-{consensus_name}-{cluster_idx + 1:03d}"
+            if clean_prefix != "Unknown":
+                otu_id = f"DeepBio-NTU-{clean_prefix}-{cluster_idx + 1:03d}"
             else:
                 otu_id = f"DeepBio-NTU-Unknown-{cluster_idx + 1:03d}"
             cluster_idx += 1
             
             # @BioArch: Terminal Log for Centroid Anchoring
-            print(f"[DISCOVERY] Cluster {otu_id} anchored to Phylum: {consensus_name} via centroid consensus.")
-            logger.info(f"[DISCOVERY] Cluster {otu_id} anchored to Phylum: {consensus_name} via centroid consensus.")
+            print(f"[DISCOVERY] Cluster {otu_id} anchored to {consensus_rank}: {consensus_name} via centroid consensus.")
+            logger.info(f"[DISCOVERY] Cluster {otu_id} anchored to {consensus_rank}: {consensus_name} via centroid consensus.")
             
             # Divergence Metric
             if avg_member_distance > 0.25:
