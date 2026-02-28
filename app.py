@@ -1153,48 +1153,48 @@ with tab_discovery:
                         if st.button("EXPORT ARCHIVE", key=f"exp_{entity['otu_id']}", icon=":material/folder_zip:"):
                             import json
                             export_dir = Path("E:/DeepBio_Scan/results") / entity['otu_id']
-                        if not Path("E:/").exists():
-                            export_dir = Path("data/results") / entity['otu_id']
-                        
-                        export_dir.mkdir(parents=True, exist_ok=True)
-                        
-                        # 1. FASTA
-                        with open(export_dir / f"{entity['otu_id']}.fasta", "w") as f:
-                            f.write(cluster_fasta)
+                            if not Path("E:/").exists():
+                                export_dir = Path("data/results") / entity['otu_id']
                             
-                        # 2. JSON Metadata
-                        metadata = {
-                            "otu_id": entity['otu_id'],
-                            "representative_id": entity.get('representative_id', 'Unknown'),
-                            "cluster_size": entity['cluster_size'],
-                            "biological_divergence": entity['biological_divergence'],
-                            "lineage": entity.get('lineage', 'Unknown'),
-                            "centroid_vector": [float(x) for x in entity.get('avg_vector', [])]
-                        }
-                        with open(export_dir / "metadata.json", "w") as f:
-                            json.dump(metadata, f, indent=4)
+                            export_dir.mkdir(parents=True, exist_ok=True)
                             
-                        # 3. High-res PNG
-                        try:
-                            rep_id = entity.get('representative_id')
-                            if rep_id:
-                                if 'manifold_cache' not in st.session_state or rep_id not in st.session_state['manifold_cache']:
-                                    # Generate manifold if not cached
-                                    rep_vector = entity.get('avg_vector')
-                                    if rep_vector is not None:
-                                        viz.get_neighborhood_manifold(
-                                            query_id=rep_id,
-                                            query_vector=rep_vector,
-                                            atlas_manager=atlas,
-                                            top_k=500
-                                        )
+                            # 1. FASTA
+                            with open(export_dir / f"{entity['otu_id']}.fasta", "w") as f:
+                                f.write(cluster_fasta)
                                 
-                                fig_3d = viz.create_localized_plot(rep_id)
-                                fig_3d.write_image(str(export_dir / "manifold.png"), width=1920, height=1080, scale=2)
-                        except Exception as e:
-                            logger.error(f"Failed to export PNG: {e}")
-                            
-                        st.toast(f"✅ Exported {entity['otu_id']} to {export_dir}")
+                            # 2. JSON Metadata
+                            metadata = {
+                                "otu_id": entity['otu_id'],
+                                "representative_id": entity.get('representative_id', 'Unknown'),
+                                "cluster_size": entity['cluster_size'],
+                                "biological_divergence": entity['biological_divergence'],
+                                "lineage": entity.get('lineage', 'Unknown'),
+                                "centroid_vector": [float(x) for x in entity.get('avg_vector', [])]
+                            }
+                            with open(export_dir / "metadata.json", "w") as f:
+                                json.dump(metadata, f, indent=4)
+                                
+                            # 3. High-res PNG
+                            try:
+                                rep_id = entity.get('representative_id')
+                                if rep_id:
+                                    if 'manifold_cache' not in st.session_state or rep_id not in st.session_state['manifold_cache']:
+                                        # Generate manifold if not cached
+                                        rep_vector = entity.get('avg_vector')
+                                        if rep_vector is not None:
+                                            viz.get_neighborhood_manifold(
+                                                query_id=rep_id,
+                                                query_vector=rep_vector,
+                                                atlas_manager=atlas,
+                                                top_k=500
+                                            )
+                                    
+                                    fig_3d = viz.create_localized_plot(rep_id)
+                                    fig_3d.write_image(str(export_dir / "manifold.png"), width=1920, height=1080, scale=2)
+                            except Exception as e:
+                                logger.error(f"Failed to export PNG: {e}")
+                                
+                            st.toast(f"✅ Exported {entity['otu_id']} to {export_dir}")
 
             st.divider()
             
